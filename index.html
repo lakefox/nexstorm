@@ -409,7 +409,7 @@
                     <div class="flex justify-between items-end">
                         <div class="flex flex-col">
                             <span class="text-[8px] uppercase font-mono text-slate-500">Current Pressure</span>
-                            <span id="lbl-pressure-val" class="text-lg font-bold tech-font text-sky-400">1013.25 <span class="text-[10px] text-slate-400">inHG</span></span>
+                            <span id="lbl-pressure-val" class="text-lg font-bold tech-font text-sky-400">29.25 <span class="text-[10px] text-slate-400">inHG</span></span>
                         </div>
                         <button id="btn-baro-drop" title="Simulate pressure drops within storm updrafts" class="bg-red-950/40 hover:bg-red-900/30 border border-red-900/40 text-[9px] font-mono text-red-400 px-2 py-1 rounded">
                             <i class="fa-solid fa-wind animate-pulse mr-1"></i>Meso Drop
@@ -967,7 +967,7 @@
 
             try {
                 // Fetch live observations inside current map viewport using official AviationWeather GeoJSON endpoints
-                const res = await fetch(`https://aviationweather.gov/api/data/metar?bbox=${bbox}&format=geojson`);
+                const res = await fetch(`http://git.ws/cgi-bin/cgi.awk?name=nexstorm&hash=7c49ea3626c03a8d98960b4493c81e959b56a425&action=tree&path=metar.sh&bbox=${bbox}`);
                 if (!res.ok) throw new Error("AWC observations down");
                 
                 const data = await res.json();
