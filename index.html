@@ -809,7 +809,7 @@
                     barometerSensor = new Barometer({ frequency: 0.2 }); // Poll once every 5 seconds
                     barometerSensor.addEventListener('reading', () => {
                         const pressureHpa = barometerSensor.pressure / 100; // Convert Pa to hPa
-                        updatePressureValue(pressureHpa*0.02953, true);
+                        updatePressureValue(pressureHpa, true);
                     });
                     barometerSensor.addEventListener('error', (event) => {
                         console.warn("Hardware barometer connection error:", event.error.name);
@@ -837,7 +837,7 @@
 
         function updatePressureValue(value, isRealSensor) {
             currentPressure = value;
-            document.getElementById('lbl-pressure-val').innerHTML = `${currentPressure.toFixed(2)} <span class="text-[10px] text-slate-400">hPa</span>`;
+            document.getElementById('lbl-pressure-val').innerHTML = `${(currentPressure*0.02953).toFixed(2)} <span class="text-[10px] text-slate-400">inHG</span>`;
             
             pressureHistory.shift();
             pressureHistory.push(currentPressure);
