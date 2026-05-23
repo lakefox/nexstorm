@@ -1,0 +1,2295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NexStorm - Tactical Storm Intercept HUD & Radar Terminal</title>
+    
+    <!-- Leaflet Map CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    
+    <!-- Google Fonts (Inter & Orbitron for Tech Dashboard) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+    
+    <!-- Tone.js for client-side procedural alert sounds -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #030712;
+            overflow-x: hidden;
+            transition: filter 0.3s ease;
+        }
+        
+        .tech-font {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        /* Tactical HUD Night Vision Mode (Grayscale + Monochromatic Red/Orange preserve night adaptation) */
+        .night-vision-mode {
+            filter: grayscale(100%) brightness(55%) sepia(100%) hue-rotate(-50deg) saturate(600%) !important;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0b0f19;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #374151;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4b5563;
+        }
+
+        /* Leaflet Dark Popup Customization */
+        .leaflet-popup-content-wrapper {
+            background: rgba(17, 24, 39, 0.95) !important;
+            color: #f3f4f6 !important;
+            border: 1px solid rgba(75, 85, 99, 0.4) !important;
+            backdrop-filter: blur(8px);
+            border-radius: 8px !important;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5) !important;
+        }
+        .leaflet-popup-tip {
+            background: rgba(17, 24, 39, 0.95) !important;
+            border: 1px solid rgba(75, 85, 99, 0.4) !important;
+        }
+        .leaflet-container {
+            background-color: #0c0f1d !important;
+        }
+
+        /* Pulsing Alert Keyframes */
+        @keyframes alert-pulse {
+            0%, 100% { border-color: rgba(239, 68, 68, 0.4); box-shadow: 0 0 0 0px rgba(239, 68, 68, 0.2); }
+            50% { border-color: rgba(239, 68, 68, 1); box-shadow: 0 0 12px 4px rgba(239, 68, 68, 0.4); }
+        }
+        .pulse-severe {
+            animation: alert-pulse 1.8s infinite;
+        }
+
+        @keyframes scanning {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .radar-scan {
+            animation: scanning 4s linear infinite;
+        }
+
+        .custom-gps-marker {
+            background: none;
+            border: none;
+        }
+
+        .custom-metar-marker {
+            background: none;
+            border: none;
+        }
+    </style>
+</head>
+<body class="text-slate-100 flex flex-col h-screen overflow-hidden">
+
+    <!-- Toast Notifications Container -->
+    <div id="toast-container" class="fixed top-20 right-4 z-[3000] flex flex-col gap-2 pointer-events-none"></div>
+
+    <header class="bg-slate-900/90 border-b border-slate-800 backdrop-blur-md px-6 py-3 flex items-center justify-between z-[1000] shrink-0">
+        <div class="flex items-center space-x-3">
+            <div class="relative w-10 h-10 flex items-center justify-center bg-sky-950/80 rounded-lg border border-sky-500/30">
+                <i class="fa-solid fa-satellite-dish text-sky-400 text-lg z-10"></i>
+                <div class="absolute inset-0 border-2 border-dashed border-sky-400/20 rounded-lg radar-scan"></div>
+            </div>
+            <div>
+                <h1 class="text-md font-bold tracking-wider uppercase text-slate-100 flex items-center gap-2">
+                    NEXSTORM <span class="text-[10px] bg-red-600/30 text-red-400 px-2 py-0.5 rounded border border-red-500/20 uppercase font-mono tracking-widest animate-pulse">Tactical HUD</span>
+                </h1>
+                <p class="text-[10px] text-slate-400 uppercase tracking-widest font-mono">Storm Intercept Operations Console</p>
+            </div>
+        </div>
+
+        <!-- System Stats Bar -->
+        <div class="hidden lg:flex items-center space-x-6 text-xs font-mono border-l border-r border-slate-800 px-6 py-1">
+            <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
+                <span>TORNADO: <span id="stat-tor" class="text-red-400 font-bold">0</span></span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>
+                <span>SVR TSTM: <span id="stat-svr" class="text-yellow-400 font-bold">0</span></span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                <span>FLASH FLOOD: <span id="stat-ff" class="text-emerald-400 font-bold">0</span></span>
+            </div>
+        </div>
+
+        <!-- Search & Advanced Tactical Controls -->
+        <div class="flex items-center space-x-3">
+            <!-- Tactical Night Vision Mode Trigger -->
+            <button id="btn-night-vision" title="Toggle Red Light Tactical HUD Mode" class="bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700/50 p-2 rounded-lg text-rose-500 hover:text-rose-400 transition-all">
+                <i class="fa-solid fa-eye-low-vision text-sm"></i>
+                <span class="hidden xl:inline ml-1 font-mono text-xs">Night Ops</span>
+            </button>
+
+            <div class="relative flex items-center">
+                <input id="search-input" type="text" placeholder="Search Intercept Target..." 
+                    class="bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-sky-500 rounded-lg px-3 py-1.5 text-xs w-40 md:w-56 transition-all focus:outline-none text-slate-200 pl-8 font-mono">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 text-[10px] text-slate-500"></i>
+                <button id="search-btn" class="absolute right-1 text-[10px] bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded text-slate-300">GO</button>
+            </div>
+            <button id="btn-gps" title="Toggle GPS Tracking Marker" class="bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700/50 p-2 rounded-lg text-slate-300 hover:text-sky-400 transition-all">
+                <i class="fa-solid fa-location-crosshairs"></i>
+            </button>
+            <button id="btn-telemetry-toggle" title="Toggle Dashboard Telemetry Panel" class="bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700/50 px-3 py-2 rounded-lg text-slate-300 hover:text-orange-400 transition-all text-xs flex items-center gap-1.5">
+                <i class="fa-solid fa-gauge"></i>
+                <span class="hidden md:inline font-mono">Dashboard</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="flex flex-1 overflow-hidden relative">
+        
+        <!-- Left Panel: Severe Alerts feed & Tactical Options -->
+        <aside id="alert-sidebar" class="absolute md:relative inset-y-0 left-0 w-80 bg-slate-900/95 md:bg-slate-950/80 border-r border-slate-800 backdrop-blur-md flex flex-col z-[1000] transition-all duration-300 transform -translate-x-full md:translate-x-0">
+            <!-- Sidebar Header -->
+            <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+                <h2 class="text-xs font-bold tracking-widest text-slate-400 uppercase font-mono">Warning Stream</h2>
+                <div class="flex items-center space-x-2">
+                    <button id="sound-toggle" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 px-2 py-1 rounded text-[10px] flex items-center gap-1 transition-all" title="Toggle audio alarms">
+                        <i id="sound-icon" class="fa-solid fa-volume-mute text-slate-500"></i>
+                        <span id="sound-text">Mute Audio</span>
+                    </button>
+                    <!-- Close button for mobile -->
+                    <button class="md:hidden text-slate-400 hover:text-slate-100" onclick="toggleSidebar()">
+                        <i class="fa-solid fa-times"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Warning Feed Stream -->
+            <div id="alerts-container" class="flex-1 overflow-y-auto p-3 space-y-2">
+                <div class="flex flex-col items-center justify-center h-48 text-center px-4">
+                    <i class="fa-solid fa-triangle-exclamation text-slate-600 text-2xl mb-2 animate-pulse"></i>
+                    <p class="text-xs text-slate-400 font-mono">Acquiring NWS alert grids...</p>
+                </div>
+            </div>
+
+            <!-- Footer: Global Radar Palette Info -->
+            <div class="p-4 border-t border-slate-800 bg-slate-950/50">
+                <div class="flex justify-between text-[10px] text-slate-400 uppercase font-mono mb-2">
+                    <span>Quick Filter Streams</span>
+                    <span id="warning-total-lbl">0 Total</span>
+                </div>
+                <div class="grid grid-cols-3 gap-1">
+                    <button onclick="filterWarnings('Tornado')" class="p-1 rounded bg-red-950/40 border border-red-900/40 text-[9px] font-mono hover:bg-red-900/30 text-red-400 text-center">TOR</button>
+                    <button onclick="filterWarnings('Severe')" class="p-1 rounded bg-yellow-950/40 border border-yellow-900/40 text-[9px] font-mono hover:bg-yellow-900/30 text-yellow-400 text-center">SVR</button>
+                    <button onclick="filterWarnings('Flood')" class="p-1 rounded bg-emerald-950/40 border border-emerald-900/40 text-[9px] font-mono hover:bg-emerald-900/30 text-emerald-400 text-center">FFW</button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Center Map & Overlays -->
+        <section class="flex-1 flex flex-col relative h-full">
+            
+            <!-- Floating Mobile Sidebar Toggles -->
+            <div class="absolute top-4 left-4 z-[999] flex gap-2">
+                <button onclick="toggleSidebar()" class="md:hidden bg-slate-900/90 border border-slate-800 px-3 py-2 rounded-lg text-slate-300">
+                    <i class="fa-solid fa-bars mr-1"></i> <span class="text-xs font-mono">Alerts</span>
+                </button>
+                <button onclick="toggleTelemetry()" class="md:hidden bg-slate-900/90 border border-slate-800 px-3 py-2 rounded-lg text-slate-300">
+                    <i class="fa-solid fa-gauge mr-1"></i> <span class="text-xs font-mono">HUD</span>
+                </button>
+            </div>
+
+            <!-- Map Coordinate Intercept Planning Overlay Tools -->
+            <div class="absolute top-16 left-4 z-[999] bg-slate-900/90 border border-slate-800 p-2 rounded-lg flex flex-col gap-2 shadow-xl pointer-events-auto">
+                <button id="btn-draw-planner" title="Initiate Cell Intercept Vector Plotter" class="bg-slate-950 hover:bg-slate-800 active:scale-95 border border-slate-800 p-2 rounded text-slate-300 hover:text-red-400 transition-all flex items-center gap-1.5 text-xs font-mono">
+                    <i class="fa-solid fa-drafting-compass"></i>
+                    <span>Plot Intercept Vector</span>
+                </button>
+                <div id="planner-status-bar" class="hidden text-[8px] font-mono text-red-400 uppercase animate-pulse text-center">
+                    [Drawing Path...]
+                </div>
+            </div>
+
+            <!-- Leaflet Map Element -->
+            <div id="map" class="w-full flex-1 z-[1]"></div>
+
+            <!-- BOTTOM HUD INTERACTIVE COMMAND BLOCK -->
+            <div class="absolute bottom-4 left-1/2 -translate-x-1/2 w-[92%] max-w-5xl bg-slate-900/95 border border-slate-800 backdrop-blur-md rounded-xl p-4 shadow-2xl z-[999] flex flex-col xl:flex-row gap-4 justify-between items-center">
+                
+                <!-- Playback controls -->
+                <div class="flex items-center space-x-3 w-full xl:w-auto justify-between xl:justify-start">
+                    <div class="flex items-center space-x-1">
+                        <button id="btn-loop-prev" class="bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 w-8 h-8 rounded-lg flex items-center justify-center transition-all">
+                            <i class="fa-solid fa-backward-step"></i>
+                        </button>
+                        <button id="btn-loop-play" class="bg-sky-600 hover:bg-sky-500 active:scale-95 text-white w-10 h-10 rounded-lg flex items-center justify-center shadow-lg shadow-sky-900/30 transition-all">
+                            <i id="play-icon" class="fa-solid fa-play"></i>
+                        </button>
+                        <button id="btn-loop-next" class="bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 w-8 h-8 rounded-lg flex items-center justify-center transition-all">
+                            <i class="fa-solid fa-forward-step"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="flex flex-col">
+                        <span id="timeline-time" class="text-xs font-mono font-bold tracking-widest text-sky-400">Loading Radar Loop...</span>
+                        <span id="timeline-status" class="text-[9px] uppercase tracking-widest text-slate-500 font-mono">NEXRAD Real-time feed</span>
+                    </div>
+                </div>
+
+                <!-- Timeline Slider -->
+                <div class="flex-1 w-full flex items-center space-x-3">
+                    <span class="text-[9px] font-mono text-slate-500">PAST</span>
+                    <input id="timeline-slider" type="range" min="0" max="7" value="7" class="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500 focus:outline-none">
+                    <span class="text-[9px] font-mono text-sky-400">LIVE</span>
+                </div>
+
+                <!-- Multi-Column Command Suite (Radar, Clouds, SPC Convective, METAR Winds) -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 w-full xl:w-auto border-t xl:border-t-0 border-slate-800 pt-3 xl:pt-0">
+                    <!-- Column 1: Radar Layer -->
+                    <div class="flex flex-col space-y-1">
+                        <label class="text-[8px] uppercase font-mono text-slate-500">NEXRAD Layer</label>
+                        <select id="layer-select" class="bg-slate-950 text-slate-300 text-[10px] rounded border border-slate-800 py-1 px-1.5 focus:outline-none focus:border-sky-500 w-full font-mono">
+                            <option value="nexrad-n0r-900913" selected>Base Reflectivity (N0R)</option>
+                            <option value="nexrad-n0q-900913">Hi-Res Reflectivity (N0Q)</option>
+                            <option value="nexrad-n1p-900913">Storm Precip (N1P)</option>
+                        </select>
+                        <div class="flex justify-between text-[8px] uppercase font-mono text-slate-500">
+                            <span>Opacity:</span>
+                            <span id="opacity-val">80%</span>
+                        </div>
+                        <input id="radar-opacity" type="range" min="0" max="100" value="80" class="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500">
+                    </div>
+
+                    <!-- Column 2: NASA Clouds -->
+                    <div class="flex flex-col space-y-1">
+                        <label class="text-[8px] uppercase font-mono text-slate-500">NASA Satellite</label>
+                        <select id="cloud-select" class="bg-slate-950 text-slate-300 text-[10px] rounded border border-slate-800 py-1 px-1.5 focus:outline-none focus:border-emerald-500 w-full font-mono">
+                            <option value="none">Disabled</option>
+                            <option value="goes-east" selected>GOES-East IR</option>
+                            <option value="goes-west">GOES-West IR</option>
+                            <option value="both">Both (East/West)</option>
+                        </select>
+                        <div class="flex justify-between text-[8px] uppercase font-mono text-slate-500">
+                            <span>Opacity:</span>
+                            <span id="cloud-opacity-val">45%</span>
+                        </div>
+                        <input id="cloud-opacity" type="range" min="0" max="100" value="45" class="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500">
+                    </div>
+
+                    <!-- Column 3: SPC Convective Outlook -->
+                    <div class="flex flex-col space-y-2 bg-slate-950/40 p-1.5 rounded border border-slate-800/40">
+                        <span class="text-[8px] uppercase font-mono text-slate-500">SPC Outlook</span>
+                        <div class="flex items-center gap-1.5">
+                            <input type="checkbox" id="chk-spc" class="accent-orange-500 rounded cursor-pointer">
+                            <label for="chk-spc" class="text-[10px] font-mono text-slate-300 cursor-pointer">Day 1 Convective</label>
+                        </div>
+                        <span id="spc-status-lbl" class="text-[7px] font-mono text-slate-500 uppercase">OFFLINE</span>
+                    </div>
+
+                    <!-- Column 4: Local METAR Winds -->
+                    <div class="flex flex-col space-y-2 bg-slate-950/40 p-1.5 rounded border border-slate-800/40">
+                        <span class="text-[8px] uppercase font-mono text-slate-500">METAR winds</span>
+                        <div class="flex items-center gap-1.5">
+                            <input type="checkbox" id="chk-metar" class="accent-teal-500 rounded cursor-pointer">
+                            <label for="chk-metar" class="text-[10px] font-mono text-slate-300 cursor-pointer">Surface Stations</label>
+                        </div>
+                        <span id="metar-status-lbl" class="text-[7px] font-mono text-slate-500 uppercase">OFFLINE</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Legend & Floating Overlays Container (Top Right) -->
+            <div id="right-map-widgets-container" class="absolute top-4 right-4 z-[999] flex flex-col gap-3 w-80 max-h-[75vh] overflow-y-auto pointer-events-none">
+                <!-- Legend Overlay -->
+                <div class="bg-slate-900/90 border border-slate-800 backdrop-blur-md rounded-xl p-3 shadow-2xl w-full hidden sm:block pointer-events-auto">
+                    <div class="flex justify-between items-center text-[10px] font-mono text-slate-400 mb-1.5 uppercase tracking-widest">
+                        <span>Reflectivity Scale</span>
+                        <span>dBZ</span>
+                    </div>
+                    <!-- dBZ Gradient bar representing standard weather color scales -->
+                    <div class="h-3 w-full rounded flex overflow-hidden">
+                        <div style="background-color: #00ffff;" class="flex-1" title="5 dBZ"></div>
+                        <div style="background-color: #04bcfc;" class="flex-1" title="15 dBZ"></div>
+                        <div style="background-color: #0100f8;" class="flex-1" title="25 dBZ"></div>
+                        <div style="background-color: #00e000;" class="flex-1" title="30 dBZ"></div>
+                        <div style="background-color: #00a000;" class="flex-1" title="35 dBZ"></div>
+                        <div style="background-color: #006000;" class="flex-1" title="40 dBZ"></div>
+                        <div style="background-color: #ffff00;" class="flex-1" title="45 dBZ"></div>
+                        <div style="background-color: #e0a000;" class="flex-1" title="50 dBZ"></div>
+                        <div style="background-color: #ff0000;" class="flex-1" title="55 dBZ"></div>
+                        <div style="background-color: #c00000;" class="flex-1" title="60 dBZ"></div>
+                        <div style="background-color: #800000;" class="flex-1" title="65 dBZ"></div>
+                        <div style="background-color: #ff00ff;" class="flex-1" title="70 dBZ"></div>
+                        <div style="background-color: #990099;" class="flex-1" title="75 dBZ"></div>
+                    </div>
+                    <div class="flex justify-between text-[8px] font-mono text-slate-500 mt-1 uppercase">
+                        <span>Rain (5)</span>
+                        <span>Storm (35)</span>
+                        <span>Severe (50)</span>
+                        <span>Hail (75)</span>
+                    </div>
+
+                    <!-- SPC Color scale overlay details (Visible if checked) -->
+                    <div id="spc-legend-hud" class="hidden border-t border-slate-800/60 mt-2.5 pt-2">
+                        <div class="text-[9px] font-mono text-slate-400 uppercase tracking-widest mb-1">SPC Risk Levels</div>
+                        <div class="grid grid-cols-6 gap-0.5 text-[8px] font-mono font-bold text-center text-slate-900">
+                            <div style="background-color: #c0dec0;" class="rounded-sm" title="Thunderstorm">TSTM</div>
+                            <div style="background-color: #79a579;" class="rounded-sm text-slate-100" title="Marginal">MRGL</div>
+                            <div style="background-color: #f7f779;" class="rounded-sm" title="Slight">SLGT</div>
+                            <div style="background-color: #f7b05b;" class="rounded-sm" title="Enhanced">ENH</div>
+                            <div style="background-color: #e55b5b;" class="rounded-sm text-slate-100" title="Moderate">MDT</div>
+                            <div style="background-color: #f75bf7;" class="rounded-sm" title="High">HIGH</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Floating Telemetry Container (under Legend, visible when sidebar is collapsed) -->
+                <div id="floating-telemetry-box" class="flex-col gap-3 hidden pointer-events-auto">
+                    <!-- Dynamic floating layout nodes -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Panel: Telemetry Dashboard, Barometer Graph, and Live Dashcam Feed -->
+        <aside id="telemetry-sidebar" class="absolute inset-y-0 right-0 w-80 bg-slate-900/95 md:bg-slate-950/80 border-l border-slate-800 backdrop-blur-md flex flex-col z-[1000] transition-all duration-300 transform translate-x-full md:translate-x-0">
+            <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-gauge-high text-orange-400"></i>
+                    <h2 class="text-xs font-bold tracking-widest text-slate-400 uppercase font-mono">Telemetry & Sensors</h2>
+                </div>
+                <div class="flex items-center gap-2">
+                    <!-- Collapse Button for desktop/mobile -->
+                    <button id="btn-close-telemetry" title="Collapse Panel" class="text-slate-400 hover:text-slate-100 p-1">
+                        <i class="fa-solid fa-angles-right text-xs"></i>
+                    </button>
+                    <button class="md:hidden text-slate-400 hover:text-slate-100" onclick="toggleTelemetry()">
+                        <i class="fa-solid fa-times"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Dynamic widget placeholder elements -->
+            <div id="telemetry-widgets-container" class="flex-1 overflow-y-auto p-4 space-y-4">
+                
+                <!-- Time & Clock Monitor -->
+                <div id="clock-widget-wrapper" class="bg-slate-950/70 border border-slate-800 rounded-lg p-3">
+                    <div class="flex justify-between items-center text-[10px] font-mono text-slate-500 uppercase mb-1">
+                        <span>Chaser Terminal Time</span>
+                        <span class="text-orange-400 animate-pulse font-bold">● Operations Active</span>
+                    </div>
+                    <div id="telemetry-clock" class="text-lg font-bold tech-font text-slate-100 tracking-wider">00:00:00 AM</div>
+                    <div id="telemetry-date" class="text-[10px] text-slate-400 font-mono mt-0.5">--- --, ----</div>
+                </div>
+
+                <!-- Barometer Device Widget (Atmospheric Pressure Trends) -->
+                <div id="barometer-widget-wrapper" class="bg-slate-950/70 border border-slate-800 rounded-lg p-3 space-y-2">
+                    <div class="flex justify-between items-center text-[10px] font-mono text-slate-500 uppercase border-b border-slate-800/60 pb-1.5">
+                        <span>Atmospheric Barometer</span>
+                        <div class="flex items-center gap-1">
+                            <span id="baro-sensor-badge" class="w-1.5 h-1.5 rounded-full bg-slate-600"></span>
+                            <span id="baro-sensor-lbl" class="text-[8px] font-mono text-slate-500 uppercase">Simulated</span>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-between items-end">
+                        <div class="flex flex-col">
+                            <span class="text-[8px] uppercase font-mono text-slate-500">Current Pressure</span>
+                            <span id="lbl-pressure-val" class="text-lg font-bold tech-font text-sky-400">1013.25 <span class="text-[10px] text-slate-400">hPa</span></span>
+                        </div>
+                        <button id="btn-baro-drop" title="Simulate pressure drops within storm updrafts" class="bg-red-950/40 hover:bg-red-900/30 border border-red-900/40 text-[9px] font-mono text-red-400 px-2 py-1 rounded">
+                            <i class="fa-solid fa-wind animate-pulse mr-1"></i>Meso Drop
+                        </button>
+                    </div>
+
+                    <!-- Live Trending Sparkline (Rendered using inline responsive SVGs) -->
+                    <div class="h-12 w-full bg-slate-950 border border-slate-900 rounded p-1 flex items-center justify-center relative overflow-hidden">
+                        <svg id="svg-baro-chart" class="absolute inset-0 w-full h-full" viewBox="0 0 100 40" preserveAspectRatio="none">
+                            <path id="path-baro-line" d="M0,20 L10,20 L20,20" fill="none" stroke="#38bdf8" stroke-width="1.5" />
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- Storm Intercept planner corridor path results -->
+                <div id="corridor-widget-wrapper" class="bg-slate-950/70 border border-slate-800 rounded-lg p-3 space-y-2 hidden">
+                    <div class="flex justify-between items-center text-[10px] font-mono text-slate-500 uppercase border-b border-slate-800/60 pb-1.5">
+                        <span>Intercept Path Log</span>
+                        <button id="btn-clear-corridor" class="text-[8px] font-mono text-slate-500 hover:text-slate-100 uppercase underline">Clear</button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-1 text-[9px] font-mono">
+                        <span class="text-slate-500">CORRIDOR DIR:</span>
+                        <span id="lbl-corridor-heading" class="text-slate-300 font-bold">---°</span>
+                        <span class="text-slate-500">CELL SPEED:</span>
+                        <div class="flex items-center gap-1">
+                            <input id="input-cell-speed" type="number" min="5" max="100" value="40" class="bg-slate-950 border border-slate-800 w-12 text-center rounded text-orange-400">
+                            <span class="text-slate-400">MPH</span>
+                        </div>
+                    </div>
+                    <!-- Computed Intercept Intersections list -->
+                    <div id="planner-eta-container" class="space-y-1 mt-2 max-h-32 overflow-y-auto border border-slate-900 bg-slate-950/40 p-1 rounded">
+                        <p class="text-[8px] font-mono text-slate-500 italic text-center">Plot vector to evaluate ETA targets</p>
+                    </div>
+                </div>
+
+                <!-- Dashcam Viewport Wrapper -->
+                <div id="dashcam-widget-wrapper" class="bg-slate-950/70 border border-slate-800 rounded-lg overflow-hidden flex flex-col">
+                    <div class="p-2 border-b border-slate-800 flex justify-between items-center bg-slate-900/40">
+                        <span class="text-[9px] uppercase font-mono text-slate-400 flex items-center gap-1">
+                            <i class="fa-solid fa-video text-slate-400"></i> Dashcam Input
+                        </span>
+                        <div class="flex items-center gap-1.5">
+                            <span id="dashcam-indicator" class="w-1.5 h-1.5 rounded-full bg-slate-600"></span>
+                            <span id="dashcam-status-lbl" class="text-[8px] font-mono text-slate-500 uppercase">Disconnected</span>
+                        </div>
+                    </div>
+                    
+                    <div id="dashcam-container" class="relative bg-slate-950 flex items-center justify-center border-b border-slate-800 transition-all duration-200 mx-auto w-full overflow-hidden" style="height: 150px;">
+                        <video id="dashcam-video" class="absolute inset-0 w-full h-full object-cover hidden" autoplay muted playsinline></video>
+                        <div id="dashcam-placeholder" class="text-center p-4">
+                            <i class="fa-solid fa-camera-rotate text-slate-700 text-2xl mb-1.5"></i>
+                            <p class="text-[10px] text-slate-500 font-mono">No Active Feed</p>
+                        </div>
+                    </div>
+
+                    <!-- Web Cam Resize Controller Controls -->
+                    <div class="p-2 border-b border-slate-800/60 bg-slate-950/40 space-y-2">
+                        <div class="flex items-center justify-between text-[8px] uppercase font-mono text-slate-500">
+                            <span>Dashcam Height</span>
+                            <span id="lbl-cam-height" class="text-sky-400 font-bold">150px</span>
+                        </div>
+                        <input id="slider-cam-height" type="range" min="100" max="400" value="150" class="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500 focus:outline-none">
+                        
+                        <div class="flex items-center justify-between text-[8px] uppercase font-mono text-slate-500">
+                            <span>Dashcam Width</span>
+                            <span id="lbl-cam-width" class="text-sky-400 font-bold">100%</span>
+                        </div>
+                        <input id="slider-cam-width" type="range" min="150" max="320" value="320" class="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500 focus:outline-none">
+
+                        <div class="flex gap-1 justify-between">
+                            <button id="btn-size-sm" class="flex-1 text-[8px] bg-slate-900 hover:bg-slate-800 border border-slate-800 py-1 rounded text-slate-400 hover:text-slate-100 font-mono">120px H</button>
+                            <button id="btn-size-md" class="flex-1 text-[8px] bg-slate-900 hover:bg-slate-800 border border-slate-800 py-1 rounded text-slate-400 hover:text-slate-100 font-mono">180px H</button>
+                            <button id="btn-size-lg" class="flex-1 text-[8px] bg-slate-900 hover:bg-slate-800 border border-slate-800 py-1 rounded text-slate-400 hover:text-slate-100 font-mono">300px H</button>
+                            <button id="btn-pip" class="px-2 text-[8px] bg-slate-900 hover:bg-slate-800 border border-slate-800 py-1 rounded text-slate-400 hover:text-sky-400 font-mono" title="Native Picture-in-Picture mode"><i class="fa-solid fa-window-restore"></i> PiP</button>
+                        </div>
+                    </div>
+
+                    <div class="p-2 bg-slate-950/40 flex justify-between gap-2">
+                        <button id="btn-camera-power" class="w-full text-[10px] font-semibold bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 py-1.5 px-2 rounded-md transition-all font-mono flex items-center justify-center gap-1">
+                            <i class="fa-solid fa-power-off"></i> Connect Dashcam
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Live Computational Geolocation Details -->
+                <div id="geolocation-widget-wrapper" class="bg-slate-950/70 border border-slate-800 rounded-lg p-3 space-y-3 flex flex-col">
+                    <div class="flex justify-between items-center text-[10px] font-mono text-slate-500 uppercase border-b border-slate-800/60 pb-1.5">
+                        <span>Tactical Intercept GPS</span>
+                        <span id="gps-lock-badge" class="text-[9px] text-red-500 uppercase font-bold">Unbound</span>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="flex flex-col">
+                            <span class="text-[8px] uppercase font-mono text-slate-500">Latitude</span>
+                            <span id="tele-lat" class="text-xs font-bold tech-font text-slate-200">00.00000°</span>
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-[8px] uppercase font-mono text-slate-500">Longitude</span>
+                            <span id="tele-lon" class="text-xs font-bold tech-font text-slate-200">00.00000°</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="flex flex-col">
+                            <span class="text-[8px] uppercase font-mono text-slate-500">Velocity (Speed)</span>
+                            <span id="tele-speed" class="text-xs font-bold tech-font text-sky-400">0.0 MPH</span>
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-[8px] uppercase font-mono text-slate-500">Chaser Heading</span>
+                            <span id="tele-heading" class="text-xs font-bold tech-font text-emerald-400">---°</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="flex flex-col">
+                            <span class="text-[8px] uppercase font-mono text-slate-500">Altitude</span>
+                            <span id="tele-alt" class="text-xs font-bold tech-font text-purple-400">0 m</span>
+                        </div>
+                        <div class="flex flex-col flex-1">
+                            <span class="text-[8px] uppercase font-mono text-slate-500">Auto-Center Map</span>
+                            <div class="flex items-center mt-0.5">
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="chk-autocenter" class="sr-only peer" checked>
+                                    <div class="w-7 h-4 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-orange-500"></div>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recorder & Export Suite -->
+                <div id="recorder-widget-wrapper" class="bg-slate-950/70 border border-slate-800 rounded-lg p-3 space-y-3">
+                    <div class="flex justify-between items-center text-[10px] font-mono text-slate-500 uppercase border-b border-slate-800/60 pb-1.5">
+                        <span>Tactical Logging Suite</span>
+                        <div class="flex items-center gap-1">
+                            <span id="rec-dot" class="w-1.5 h-1.5 rounded-full bg-slate-600"></span>
+                            <span id="rec-timer" class="text-[9px] font-mono text-slate-500 uppercase">OFFLINE</span>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col gap-2">
+                        <button id="btn-rec-control" class="w-full text-xs font-bold bg-orange-600 hover:bg-orange-500 active:scale-95 text-white py-2 rounded-lg transition-all font-mono flex items-center justify-center gap-1.5 shadow-lg shadow-orange-900/20">
+                            <i class="fa-solid fa-circle text-[9px] animate-pulse"></i> Start Recording Session
+                        </button>
+                        <button id="btn-export-session" disabled class="w-full text-xs font-bold bg-slate-800 hover:bg-slate-700 active:scale-95 disabled:opacity-40 disabled:pointer-events-none text-slate-300 py-2 rounded-lg transition-all font-mono flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-file-export"></i> Export Intercept logs
+                        </button>
+                    </div>
+
+                    <div class="text-[9px] text-slate-500 font-mono leading-relaxed mt-1">
+                        Compiles and downloads synchronized high-resolution WebM dashcam feeds and structural CSV GPS/Barometric spatial data tables.
+                    </div>
+                </div>
+
+            </div>
+        </aside>
+
+    </main>
+
+    <!-- Detailed Severe Alert Modal -->
+    <div id="modal-alert" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[2000] hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-xl max-w-2xl w-full p-6 shadow-2xl flex flex-col max-h-[85vh]">
+            <div class="flex justify-between items-start border-b border-slate-800 pb-4 mb-4">
+                <div>
+                    <span id="modal-badge" class="text-[10px] font-mono px-2 py-0.5 rounded border uppercase">Warning</span>
+                    <h3 id="modal-title" class="text-lg font-bold text-slate-100 mt-1">Severe Alert Details</h3>
+                    <p id="modal-sub" class="text-xs text-slate-400 font-mono mt-0.5">NWS Regional Warning Office</p>
+                </div>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-100 p-1">
+                    <i class="fa-solid fa-times text-lg"></i>
+                </button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto space-y-4 pr-1 text-slate-300">
+                <div>
+                    <h4 class="text-xs uppercase font-mono text-slate-500 mb-1">Headline</h4>
+                    <p id="modal-headline" class="text-sm font-semibold text-slate-200"></p>
+                </div>
+                <div>
+                    <h4 class="text-xs uppercase font-mono text-slate-500 mb-1">Areas Affected</h4>
+                    <p id="modal-areas" class="text-xs font-mono text-sky-400"></p>
+                </div>
+                <div class="grid grid-cols-2 gap-4 bg-slate-950/40 border border-slate-800/40 p-3 rounded-lg">
+                    <div>
+                        <h4 class="text-[10px] uppercase font-mono text-slate-500">Expires</h4>
+                        <p id="modal-expires" class="text-xs font-mono text-slate-300"></p>
+                    </div>
+                    <div>
+                        <h4 class="text-[10px] uppercase font-mono text-slate-500">Urgency & Severity</h4>
+                        <p id="modal-severity" class="text-xs font-mono text-slate-300"></p>
+                    </div>
+                </div>
+                <div>
+                    <h4 class="text-xs uppercase font-mono text-slate-500 mb-1">Detailed Description</h4>
+                    <p id="modal-desc" class="text-xs whitespace-pre-line bg-slate-950/50 p-3 rounded-lg border border-slate-800/50 leading-relaxed font-mono text-slate-300"></p>
+                </div>
+                <div>
+                    <h4 class="text-xs uppercase font-mono text-slate-500 mb-1">Instructions</h4>
+                    <p id="modal-instruction" class="text-xs bg-red-950/20 border border-red-900/30 text-red-300 p-3 rounded-lg leading-relaxed"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- State and Variables ---
+        let map;
+        let radarLayers = [];
+        let activeRadarLayer = null;
+        let warningGeoJsonLayer = null;
+        
+        // Dynamic Satellite Cloud Layers
+        let cloudLayerEast = null;
+        let cloudLayerWest = null;
+
+        // SPC Day 1 Convective Outlook Layer
+        let spcOutlookLayer = null;
+
+        // METAR Observations Layer
+        let metarObservationsLayer = null;
+        let metarRefreshInterval = null;
+
+        // Storm Path Intercept Planner Variables
+        let isPlanningCorridor = false;
+        let corridorClickCount = 0;
+        let corridorStartLatLng = null;
+        let corridorEndLatLng = null;
+        let corridorLineLayer = null;
+        let corridorConeLayer = null;
+        let corridorMarkerLayers = [];
+        
+        let playbackInterval = null;
+        let playbackTimes = [];
+        let timelineIndex = 7; // Start at latest
+        let isPlaying = false;
+        
+        let allNwsAlerts = [];
+        let filteredAlerts = [];
+        let warningCounters = { Tornado: 0, Severe: 0, Flood: 0 };
+        
+        let isSoundEnabled = false;
+        let synth = null;
+
+        // --- Live GPS and Telemetry System Variables ---
+        let gpsWatchId = null;
+        let mapUserMarker = null;
+        let currentTelemetry = {
+            latitude: null,
+            longitude: null,
+            speed: null,     
+            heading: null,   
+            altitude: null,  
+            timestamp: null
+        };
+        let isTrackingGps = false;
+
+        // --- Barometric Pressure Variables ---
+        let pressureHistory = Array(20).fill(1013.25); // Baseline std pressure
+        let currentPressure = 1013.25;
+        let barometerSensor = null;
+
+        // --- Dashcam and Session Recorder System Variables ---
+        let cameraStream = null;
+        let mediaRecorder = null;
+        let recordedVideoChunks = [];
+        let sessionTelemetryHistory = []; 
+        let isRecordingSession = false;
+        let sessionRecordStartTime = null;
+        let sessionTimerInterval = null;
+
+        // Sidebar Collapse State tracking
+        let isTelemetryCollapsed = false;
+
+        // --- Color mappings for NWS warning categories ---
+        const WARNING_STYLES = {
+            'Tornado Warning': { color: '#ef4444', fillColor: '#ef4444', weight: 2.5, opacity: 0.9, fillOpacity: 0.25 },
+            'Severe Thunderstorm Warning': { color: '#eab308', fillColor: '#eab308', weight: 2, opacity: 0.85, fillOpacity: 0.18 },
+            'Flash Flood Warning': { color: '#10b981', fillColor: '#10b981', weight: 2, opacity: 0.85, fillOpacity: 0.15 },
+            'Special Marine Warning': { color: '#06b6d4', fillColor: '#06b6d4', weight: 2, opacity: 0.85, fillOpacity: 0.15 },
+            'Winter Storm Warning': { color: '#a5f3fc', fillColor: '#a5f3fc', weight: 1.5, opacity: 0.8, fillOpacity: 0.12 },
+            'default': { color: '#a855f7', fillColor: '#a855f7', weight: 1.5, opacity: 0.8, fillOpacity: 0.1 }
+        };
+
+        // --- Main Initialization ---
+        window.onload = function() {
+            initMap();
+            generateTimelineTimes();
+            loadRadarLayers();
+            updateCloudLayers(); 
+            fetchSevereAlerts();
+            setupEventListeners();
+            startTelemetryClock();
+            initBarometer(); // Connect physical sensor or fallback to simulated trends
+            
+            // Adjust default collapse view on load depending on screensize
+            if (window.innerWidth < 768) {
+                setTelemetrySidebarCollapsed(true);
+            } else {
+                setTelemetrySidebarCollapsed(false);
+            }
+
+            // Periodically refresh active warning data every 60 seconds
+            setInterval(fetchSevereAlerts, 60000);
+        };
+
+        // --- Toast Message System (Replacing native Alert Windows) ---
+        function showNotification(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            
+            let colorClasses = 'bg-slate-900 border-slate-800 text-slate-100';
+            let iconClass = 'fa-info-circle text-sky-400';
+            
+            if (type === 'success') {
+                colorClasses = 'bg-slate-900 border-emerald-900/50 text-slate-100';
+                iconClass = 'fa-circle-check text-emerald-400';
+            } else if (type === 'warning') {
+                colorClasses = 'bg-slate-900 border-yellow-900/50 text-slate-100';
+                iconClass = 'fa-triangle-exclamation text-yellow-400';
+            } else if (type === 'error') {
+                colorClasses = 'bg-slate-900 border-red-900/50 text-slate-100';
+                iconClass = 'fa-circle-exclamation text-red-400';
+            }
+
+            toast.className = `p-3 rounded-lg border ${colorClasses} shadow-xl backdrop-blur-md flex items-center gap-2.5 max-w-xs pointer-events-auto transition-all duration-300 opacity-0 translate-x-4`;
+            toast.innerHTML = `
+                <i class="fa-solid ${iconClass}"></i>
+                <div class="text-[11px] font-mono leading-relaxed">${message}</div>
+            `;
+            
+            container.appendChild(toast);
+            
+            // Force reflow for transitions
+            setTimeout(() => {
+                toast.classList.remove('opacity-0', 'translate-x-4');
+            }, 50);
+
+            // Remove Toast after delay
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-x-4');
+                setTimeout(() => {
+                    toast.remove();
+                }, 300);
+            }, 4500);
+        }
+
+        // --- Live Time Clock ---
+        function startTelemetryClock() {
+            const updateClock = () => {
+                const now = new Date();
+                const clockEl = document.getElementById('telemetry-clock');
+                const dateEl = document.getElementById('telemetry-date');
+                
+                if (clockEl) {
+                    clockEl.innerText = now.toLocaleTimeString([], { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                }
+                if (dateEl) {
+                    dateEl.innerText = now.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' });
+                }
+            };
+            updateClock();
+            setInterval(updateClock, 1000);
+        }
+
+        // --- Map Base Setup ---
+        function initMap() {
+            map = L.map('map', {
+                zoomControl: false,
+                minZoom: 3,
+                maxZoom: 18
+            }).setView([37.8, -96], 4);
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                subdomains: 'abcd',
+                maxZoom: 20
+            }).addTo(map);
+
+            L.control.zoom({
+                position: 'topright'
+            }).addTo(map);
+
+            // Register map click callbacks to intercept planning tools
+            map.on('click', handleMapClickForCorridor);
+        }
+
+        // --- STREAMING_CHUNK: Processing device atmospheric sensor inputs and graph drawings ---
+        // --- Barometer and Pressure Sensor API Hook ---
+        function initBarometer() {
+            const badge = document.getElementById('baro-sensor-badge');
+            const lbl = document.getElementById('baro-sensor-lbl');
+
+            // Attempt to bind standard Sensor API (supported on select hardware devices)
+            if (typeof Barometer !== 'undefined') {
+                try {
+                    barometerSensor = new Barometer({ frequency: 0.2 }); // Poll once every 5 seconds
+                    barometerSensor.addEventListener('reading', () => {
+                        const pressureHpa = barometerSensor.pressure / 100; // Convert Pa to hPa
+                        updatePressureValue(pressureHpa, true);
+                    });
+                    barometerSensor.addEventListener('error', (event) => {
+                        console.warn("Hardware barometer connection error:", event.error.name);
+                    });
+                    barometerSensor.start();
+                    badge.className = 'w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse';
+                    lbl.innerText = 'Device Sensor';
+                } catch (e) {
+                    console.warn("Hardware Barometer start failed. Reverting to simulator.");
+                }
+            }
+
+            // Start simulated micro barometric fluctuations (adds tactical visual depth)
+            setInterval(() => {
+                if (barometerSensor) return; // Keep standard readings
+                // Normal ambient pressure fluctuating around sea level
+                const drift = (Math.random() - 0.5) * 0.15;
+                const newPressure = Math.max(900, Math.min(1050, currentPressure + drift));
+                updatePressureValue(newPressure, false);
+            }, 5000);
+
+            // Draw initial flat sparkline
+            drawPressureChart();
+        }
+
+        function updatePressureValue(value, isRealSensor) {
+            currentPressure = value;
+            document.getElementById('lbl-pressure-val').innerHTML = `${currentPressure.toFixed(2)} <span class="text-[10px] text-slate-400">hPa</span>`;
+            
+            pressureHistory.shift();
+            pressureHistory.push(currentPressure);
+            drawPressureChart();
+
+            // Sound tactical alarm chime if pressure crashes steeply
+            if (currentPressure < 980) {
+                document.getElementById('lbl-pressure-val').className = 'text-lg font-bold tech-font text-red-500 animate-pulse';
+                if (isSoundEnabled) {
+                    triggerSirens();
+                }
+            } else {
+                document.getElementById('lbl-pressure-val').className = 'text-lg font-bold tech-font text-sky-400';
+            }
+        }
+
+        function triggerMesoPressureCollapse() {
+            showNotification("Entering storm core. Initiating simulated meso-updraft pressure plunge...", "warning");
+            let steps = 0;
+            const collapseInterval = setInterval(() => {
+                steps++;
+                // Crash atmospheric pressure rapidly to simulate severe tornado proximity (965 hPa)
+                const fall = 1013.25 - (steps * 2.5);
+                updatePressureValue(fall, false);
+                
+                if (steps >= 20) {
+                    clearInterval(collapseInterval);
+                    showNotification("WARNING: Severe low pressure threshold reached (<970 hPa)!", "error");
+                }
+            }, 300);
+        }
+
+        function drawPressureChart() {
+            const svg = document.getElementById('svg-baro-chart');
+            const path = document.getElementById('path-baro-line');
+            if (!svg || !path) return;
+
+            const minP = Math.min(...pressureHistory) - 1;
+            const maxP = Math.max(...pressureHistory) + 1;
+            const pRange = maxP - minP || 1;
+
+            let points = [];
+            for (let i = 0; i < pressureHistory.length; i++) {
+                const x = (i / (pressureHistory.length - 1)) * 100;
+                // Invert coordinates since Y=0 is top in SVG
+                const y = 40 - ((pressureHistory[i] - minP) / pRange) * 32 - 4;
+                points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+            }
+
+            path.setAttribute('d', 'M' + points.join(' L'));
+        }
+
+        // --- STREAMING_CHUNK: Fetching and parsing NOAA SPC Convective Outlook layers ---
+        // --- Live SPC Day 1 Convective Outlook Layers ---
+        async function toggleSpcOutlook(active) {
+            const label = document.getElementById('spc-status-lbl');
+            const legend = document.getElementById('spc-legend-hud');
+
+            if (!active) {
+                if (spcOutlookLayer) {
+                    map.removeLayer(spcOutlookLayer);
+                    spcOutlookLayer = null;
+                }
+                label.innerText = 'OFFLINE';
+                label.className = 'text-[7px] font-mono text-slate-500 uppercase';
+                legend.classList.add('hidden');
+                return;
+            }
+
+            label.innerText = 'LOADING...';
+            label.className = 'text-[7px] font-mono text-yellow-400 uppercase animate-pulse';
+
+            try {
+                // Request live Day 1 Categorical Outlook boundary features directly from NOAA's Vector services
+                const response = await fetch('https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/SPC_wx_outlks/MapServer/1/query?where=1%3D1&outFields=*&f=geojson');
+                if (!response.ok) throw new Error("SPC NOAA server unresponsive");
+                
+                const data = await response.json();
+
+                if (spcOutlookLayer) {
+                    map.removeLayer(spcOutlookLayer);
+                }
+
+                spcOutlookLayer = L.geoJSON(data, {
+                    style: function(feature) {
+                        return {
+                            fillColor: feature.properties.fill || '#555555',
+                            fillOpacity: 0.18,
+                            color: feature.properties.stroke || '#888888',
+                            weight: 1.5,
+                            opacity: 0.75
+                        };
+                    },
+                    onEachFeature: function(feature, layer) {
+                        const p = feature.properties;
+                        const labelText = p.label2 || 'Outlook';
+                        layer.bindTooltip(`SPC DAY 1: ${labelText} Risk`, { sticky: true, className: 'bg-slate-950 border border-slate-800 text-[9px] font-mono text-slate-100 p-1 rounded' });
+                    }
+                }).addTo(map);
+
+                label.innerText = 'LIVE SYNCED';
+                label.className = 'text-[7px] font-mono text-emerald-400 uppercase font-bold';
+                legend.classList.remove('hidden');
+                showNotification("Convective Risk boundaries rendered. Crosscheck radar cells with storm threat areas.", "success");
+
+            } catch (err) {
+                console.error("SPC Outlook load failure:", err);
+                label.innerText = 'ERR / LIMIT';
+                label.className = 'text-[7px] font-mono text-red-500 uppercase font-bold';
+                document.getElementById('chk-spc').checked = false;
+                showNotification("Unable to parse SPC layers. Service limits might be choked.", "error");
+            }
+        }
+
+        // --- STREAMING_CHUNK: Gathering live airport surface observations from Aviation Weather ---
+        // --- Live surface METAR Winds observations ---
+        async function refreshSurfaceMetars() {
+            const chk = document.getElementById('chk-metar');
+            const label = document.getElementById('metar-status-lbl');
+            if (!chk.checked) return;
+
+            label.innerText = 'SCANNING...';
+            label.className = 'text-[7px] font-mono text-teal-400 uppercase animate-pulse';
+
+            const bounds = map.getBounds();
+            const bbox = `${bounds.getWest().toFixed(4)},${bounds.getSouth().toFixed(4)},${bounds.getEast().toFixed(4)},${bounds.getNorth().toFixed(4)}`;
+
+            try {
+                // Fetch live observations inside current map viewport using official AviationWeather GeoJSON endpoints
+                const res = await fetch(`https://aviationweather.gov/api/data/metar?bbox=${bbox}&format=geojson`);
+                if (!res.ok) throw new Error("AWC observations down");
+                
+                const data = await res.json();
+
+                if (metarObservationsLayer) {
+                    map.removeLayer(metarObservationsLayer);
+                }
+
+                metarObservationsLayer = L.geoJSON(data, {
+                    pointToLayer: function(feature, latlng) {
+                        const p = feature.properties;
+                        const tempF = p.temp ? (p.temp * 1.8 + 32).toFixed(0) : 'N/A';
+                        const dewF = p.dewp ? (p.dewp * 1.8 + 32).toFixed(0) : 'N/A';
+                        const speedKt = p.wspd || 0;
+                        const dirDeg = p.wdir || 0;
+                        const stationId = p.id || 'STN';
+
+                        // Set custom colored markers to easily trace drylines and warm boundary positions
+                        let windColor = 'text-sky-400';
+                        if (speedKt > 25) windColor = 'text-red-500 animate-pulse';
+                        else if (speedKt > 15) windColor = 'text-orange-400';
+
+                        let markerHtml = `
+                            <div class="flex flex-col items-center justify-center font-mono pointer-events-auto">
+                                <div class="bg-slate-950/90 border border-slate-800 rounded-md px-1 py-0.5 text-[8px] flex items-center gap-1 shadow-lg leading-none">
+                                    <span class="text-orange-400 font-bold">${tempF}°</span>
+                                    <div style="transform: rotate(${dirDeg}deg);" class="${windColor} transition-all">
+                                        <i class="fa-solid fa-arrow-up text-[9px]"></i>
+                                    </div>
+                                    <span class="text-emerald-400 font-bold">${speedKt}k</span>
+                                </div>
+                                <span class="text-[7px] text-slate-500 mt-0.5 scale-90">${stationId}</span>
+                            </div>
+                        `;
+
+                        const metarIcon = L.divIcon({
+                            className: 'custom-metar-marker',
+                            html: markerHtml,
+                            iconSize: [45, 25]
+                        });
+
+                        const marker = L.marker(latlng, { icon: metarIcon });
+                        
+                        // Setup detailed popup containing raw aviation METAR logs
+                        const popupHtml = `
+                            <div class="p-1 font-mono text-[10px] w-64 leading-relaxed">
+                                <div class="flex justify-between border-b border-slate-800 pb-1 mb-1">
+                                    <span class="font-bold text-sky-400">METAR: ${stationId}</span>
+                                    <span class="text-slate-500">${p.obsTime || 'Recent'}</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-1 mb-1.5">
+                                    <span>Temp: <strong class="text-orange-400">${tempF}°F (${p.temp}°C)</strong></span>
+                                    <span>Dew Point: <strong class="text-emerald-400">${dewF}°F (${p.dewp}°C)</strong></span>
+                                    <span>Wind: <strong class="text-yellow-400">${p.wdir}° @ ${speedKt} kt</strong></span>
+                                    <span>Altimeter: <strong class="text-purple-400">${p.altim || '29.92'} inHg</strong></span>
+                                </div>
+                                <div class="bg-slate-950/80 p-1.5 border border-slate-800 rounded text-[9px] text-slate-400 whitespace-normal leading-normal select-all">
+                                    ${p.rawOb || 'No raw string records.'}
+                                </div>
+                            </div>
+                        `;
+                        marker.bindPopup(popupHtml);
+                        return marker;
+                    }
+                }).addTo(map);
+
+                label.innerText = 'CONNECTED';
+                label.className = 'text-[7px] font-mono text-teal-400 uppercase font-bold';
+
+            } catch (err) {
+                console.error("METAR Surface fetch error:", err);
+                label.innerText = 'ERR / SECURE';
+                label.className = 'text-[7px] font-mono text-red-500 uppercase font-bold';
+            }
+        }
+
+        function toggleMetarObservations(active) {
+            const chk = document.getElementById('chk-metar');
+            const label = document.getElementById('metar-status-lbl');
+
+            if (!active) {
+                clearInterval(metarRefreshInterval);
+                if (metarObservationsLayer) {
+                    map.removeLayer(metarObservationsLayer);
+                    metarObservationsLayer = null;
+                }
+                label.innerText = 'OFFLINE';
+                label.className = 'text-[7px] font-mono text-slate-500';
+                return;
+            }
+
+            refreshSurfaceMetars();
+            // Regularly refresh surface metrics every 3 minutes
+            metarRefreshInterval = setInterval(refreshSurfaceMetars, 180000);
+            
+            // Re-fetch instantly when user drags map focus around
+            map.on('moveend', refreshSurfaceMetars);
+        }
+
+        // --- STREAMING_CHUNK: Plotting cell motion vectors and drawing mathematical cones ---
+        // --- Storm Intercept Path Planner (Cone of Uncertainty Vectoring) ---
+        function toggleCorridorPlanner() {
+            const btn = document.getElementById('btn-draw-planner');
+            const status = document.getElementById('planner-status-bar');
+
+            if (isPlanningCorridor) {
+                cancelPlanning();
+            } else {
+                isPlanningCorridor = true;
+                corridorClickCount = 0;
+                btn.className = 'bg-red-600 hover:bg-red-500 text-white font-bold border-red-500 p-2 rounded text-xs font-mono transition-all flex items-center gap-1.5';
+                status.classList.remove('hidden');
+                document.getElementById('map').style.cursor = 'crosshair';
+                showNotification("Vectoring Active: Left-click target storm core on map to set start point.", "info");
+            }
+        }
+
+        function cancelPlanning() {
+            const btn = document.getElementById('btn-draw-planner');
+            const status = document.getElementById('planner-status-bar');
+            isPlanningCorridor = false;
+            corridorClickCount = 0;
+            btn.className = 'bg-slate-950 hover:bg-slate-800 border border-slate-800 p-2 rounded text-slate-300 hover:text-red-400 transition-all flex items-center gap-1.5 text-xs font-mono';
+            status.classList.add('hidden');
+            document.getElementById('map').style.cursor = '';
+        }
+
+        function handleMapClickForCorridor(e) {
+            if (!isPlanningCorridor) return;
+
+            corridorClickCount++;
+
+            if (corridorClickCount === 1) {
+                corridorStartLatLng = e.latlng;
+                showNotification("Base-point established. Click second point downstream to indicate storm trajectory.", "info");
+            } else if (corridorClickCount === 2) {
+                corridorEndLatLng = e.latlng;
+                calculateStormCorridor();
+                cancelPlanning();
+            }
+        }
+
+        function calculateStormCorridor() {
+            if (!corridorStartLatLng || !corridorEndLatLng) return;
+
+            // 1. Clear previous layers
+            clearCorridorLayer();
+
+            const p1 = corridorStartLatLng;
+            const p2 = corridorEndLatLng;
+
+            // 2. Compute true geographic bearing (direction degrees clockwise from North)
+            const lat1 = p1.lat * Math.PI / 180;
+            const lon1 = p1.lng * Math.PI / 180;
+            const lat2 = p2.lat * Math.PI / 180;
+            const lon2 = p2.lng * Math.PI / 180;
+            const dLon = lon2 - lon1;
+
+            const y = Math.sin(dLon) * Math.cos(lat2);
+            const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+            let bearing = Math.atan2(y, x) * 180 / Math.PI;
+            bearing = (bearing + 360) % 360;
+
+            document.getElementById('lbl-corridor-heading').innerText = `${bearing.toFixed(0)}° (${getCompassDirection(bearing).split(' ')[1] || '---'})`;
+
+            // Draw center vector line
+            corridorLineLayer = L.polyline([p1, p2], {
+                color: '#ef4444',
+                weight: 2,
+                dashArray: '5, 8',
+                opacity: 0.95
+            }).addTo(map);
+
+            // Project mathematical widening cone points (standard 20-degree sweep) out to 100km (62 miles)
+            const coneDistance = 100000; // Meters
+            const outerLeft = projectPointSpherical(p1, bearing - 20, coneDistance);
+            const outerRight = projectPointSpherical(p1, bearing + 20, coneDistance);
+
+            corridorConeLayer = L.polygon([p1, outerLeft, outerRight], {
+                color: '#f97316',
+                fillColor: '#f97316',
+                fillOpacity: 0.12,
+                weight: 1.5,
+                opacity: 0.6
+            }).addTo(map);
+
+            // Compute distance ETA intervals (15, 30, 45, 60 minutes) matching storm speed
+            const speedMph = parseFloat(document.getElementById('input-cell-speed').value) || 40;
+            const speedMps = speedMph * 0.44704; // Miles per hour to Meters per second
+            const intervals = [15, 30, 45, 60];
+            const etaListContainer = document.getElementById('planner-eta-container');
+            etaListContainer.innerHTML = '';
+
+            intervals.forEach(mins => {
+                const distMeters = speedMps * (mins * 60);
+                const projectedPoint = projectPointSpherical(p1, bearing, distMeters);
+
+                // Create checkpoint flag on map
+                const checkpointMarker = L.circleMarker(projectedPoint, {
+                    radius: 5,
+                    color: '#ef4444',
+                    fillColor: '#ffffff',
+                    fillOpacity: 0.9,
+                    weight: 2
+                }).addTo(map);
+
+                checkpointMarker.bindTooltip(`${mins}m ETA Core`, { permanent: true, direction: 'right', className: 'bg-slate-950 border border-slate-800 text-[8px] font-mono text-red-400 rounded px-1' });
+                corridorMarkerLayers.push(checkpointMarker);
+
+                // Add to HUD log interface, attempting to fetch local municipal names via Nominatim reverse API
+                appendEtaLogItem(mins, projectedPoint);
+            });
+
+            document.getElementById('corridor-widget-wrapper').classList.remove('hidden');
+            showNotification("Intercept corridors drawn. Safe retreat vector points mapped.", "success");
+        }
+
+        function projectPointSpherical(start, bearing, distance) {
+            const R = 6378137; // Earth's radius in meters
+            const d = distance / R;
+            const brng = bearing * Math.PI / 180;
+            const lat1 = start.lat * Math.PI / 180;
+            const lon1 = start.lng * Math.PI / 180;
+
+            const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(brng));
+            const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(d) * Math.cos(lat1), Math.cos(d) - Math.sin(lat1) * Math.sin(lat2));
+
+            return L.latLng(lat2 * 180 / Math.PI, lon2 * 180 / Math.PI);
+        }
+
+        async function appendEtaLogItem(mins, latlng) {
+            const container = document.getElementById('planner-eta-container');
+            const row = document.createElement('div');
+            row.className = 'flex justify-between border-b border-slate-900 pb-1 text-[9px] font-mono';
+            
+            // Default placeholder string
+            row.innerHTML = `
+                <span class="text-slate-400">+${mins} MINS:</span>
+                <span class="text-sky-400 font-bold">${latlng.lat.toFixed(3)}, ${latlng.lng.toFixed(3)}</span>
+            `;
+            container.appendChild(row);
+
+            try {
+                // Fetch Nominatim reverse geocode data for real-world municipal target naming
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latlng.lat}&lon=${latlng.lng}&format=json&zoom=10`);
+                if (res.ok) {
+                    const place = await res.json();
+                    const name = place.address.city || place.address.town || place.address.county || 'Unincorporated Region';
+                    row.innerHTML = `
+                        <span class="text-red-400 font-bold">+${mins} MIN: ${name.toUpperCase()}</span>
+                        <span class="text-slate-500">${latlng.lat.toFixed(2)}, ${latlng.lng.toFixed(2)}</span>
+                    `;
+                }
+            } catch (err) {
+                // Graceful fallback
+            }
+        }
+
+        function clearCorridorLayer() {
+            if (corridorLineLayer && map.hasLayer(corridorLineLayer)) map.removeLayer(corridorLineLayer);
+            if (corridorConeLayer && map.hasLayer(corridorConeLayer)) map.removeLayer(corridorConeLayer);
+            corridorMarkerLayers.forEach(m => {
+                if (map.hasLayer(m)) map.removeLayer(m);
+            });
+            corridorMarkerLayers = [];
+            document.getElementById('planner-eta-container').innerHTML = `<p class="text-[8px] font-mono text-slate-500 italic text-center">Plot vector to evaluate ETA targets</p>`;
+        }
+
+        // --- Live Time Clock & Date ---
+        function generateTimelineTimes() {
+            playbackTimes = [];
+            const now = new Date();
+            
+            const radarDelay = 8 * 60 * 1000; 
+            const startTime = new Date(now.getTime() - radarDelay);
+            
+            for (let i = 7; i >= 0; i--) {
+                const targetTime = new Date(startTime.getTime() - (i * 5 * 60 * 1000));
+                
+                const m = targetTime.getUTCMinutes();
+                targetTime.setUTCMinutes(Math.floor(m / 5) * 5);
+                targetTime.setUTCSeconds(0);
+                targetTime.setUTCMilliseconds(0);
+                
+                playbackTimes.push(targetTime);
+            }
+        }
+
+        // --- Load WMS Tile Radar Layers ---
+        function loadRadarLayers() {
+            radarLayers.forEach(l => {
+                if (map.hasLayer(l)) map.removeLayer(l);
+            });
+            radarLayers = [];
+
+            const opacity = parseFloat(document.getElementById('radar-opacity').value) / 100;
+
+            playbackTimes.forEach((time, index) => {
+                const formattedTime = time.toISOString().substring(0, 16) + 'Z';
+                
+                const layer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r-t.cgi', {
+                    layers: 'nexrad-n0r-wmst',
+                    time: formattedTime,
+                    format: 'image/png',
+                    transparent: true,
+                    opacity: opacity,
+                    zIndex: 10 + index,
+                    attribution: 'Iowa State IEM NEXRAD'
+                });
+                
+                radarLayers.push(layer);
+            });
+
+            activeRadarLayer = radarLayers[timelineIndex];
+            activeRadarLayer.addTo(map);
+            updateTimelineUI();
+        }
+
+        // --- Managing Cloud Overlay Layers ---
+        function updateCloudLayers() {
+            const cloudType = document.getElementById('cloud-select').value;
+            const opacity = parseFloat(document.getElementById('cloud-opacity').value) / 100;
+            const todayIso = new Date().toISOString().split('T')[0];
+
+            if (cloudLayerEast && map.hasLayer(cloudLayerEast)) {
+                map.removeLayer(cloudLayerEast);
+            }
+            if (cloudLayerWest && map.hasLayer(cloudLayerWest)) {
+                map.removeLayer(cloudLayerWest);
+            }
+
+            const opacityContainer = document.getElementById('cloud-opacity').parentElement;
+            if (cloudType === 'none') {
+                opacityContainer.style.opacity = '0.35';
+                opacityContainer.style.pointerEvents = 'none';
+                return; 
+            } else {
+                opacityContainer.style.opacity = '1';
+                opacityContainer.style.pointerEvents = 'auto';
+            }
+
+            if (!cloudLayerEast) {
+                cloudLayerEast = L.tileLayer.wms('https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi', {
+                    layers: 'GOES-East_ABI_Band13_Clean_Infrared',
+                    format: 'image/png',
+                    transparent: true,
+                    opacity: opacity,
+                    time: todayIso,
+                    zIndex: 5, 
+                    attribution: 'NASA GIBS'
+                });
+            } else {
+                cloudLayerEast.setOpacity(opacity);
+            }
+
+            if (!cloudLayerWest) {
+                cloudLayerWest = L.tileLayer.wms('https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi', {
+                    layers: 'GOES-West_ABI_Band13_Clean_Infrared',
+                    format: 'image/png',
+                    transparent: true,
+                    opacity: opacity,
+                    time: todayIso,
+                    zIndex: 5,
+                    attribution: 'NASA GIBS'
+                });
+            } else {
+                cloudLayerWest.setOpacity(opacity);
+            }
+
+            if (cloudType === 'goes-east' || cloudType === 'both') {
+                cloudLayerEast.addTo(map);
+            }
+            if (cloudType === 'goes-west' || cloudType === 'both') {
+                cloudLayerWest.addTo(map);
+            }
+        }
+
+        // --- Playback Animation Engine ---
+        function updateTimelineUI() {
+            const time = playbackTimes[timelineIndex];
+            if (!time) return;
+
+            const localString = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+            const utcString = time.toISOString().replace('T', ' ').substring(11, 16) + ' UTC';
+            
+            document.getElementById('timeline-time').innerText = `${localString} (${utcString})`;
+            document.getElementById('timeline-slider').value = timelineIndex;
+            
+            if (timelineIndex === 7) {
+                document.getElementById('timeline-status').innerText = "Live Radar Image";
+                document.getElementById('timeline-status').className = "text-[9px] uppercase tracking-widest text-emerald-400 font-bold font-mono";
+            } else {
+                const elapsedMin = (7 - timelineIndex) * 5;
+                document.getElementById('timeline-status').innerText = `${elapsedMin} minutes ago`;
+                document.getElementById('timeline-status').className = "text-[9px] uppercase tracking-widest text-sky-400 font-mono";
+            }
+        }
+
+        function switchFrame(newIndex) {
+            if (newIndex < 0 || newIndex >= radarLayers.length) return;
+            
+            const prevLayer = activeRadarLayer;
+            timelineIndex = newIndex;
+            activeRadarLayer = radarLayers[timelineIndex];
+            
+            activeRadarLayer.addTo(map);
+            
+            if (prevLayer && prevLayer !== activeRadarLayer) {
+                map.removeLayer(prevLayer);
+            }
+            
+            updateTimelineUI();
+        }
+
+        function togglePlayback() {
+            const playIcon = document.getElementById('play-icon');
+            if (isPlaying) {
+                clearInterval(playbackInterval);
+                playIcon.className = 'fa-solid fa-play';
+                isPlaying = false;
+            } else {
+                playIcon.className = 'fa-solid fa-pause';
+                isPlaying = true;
+                
+                playbackInterval = setInterval(() => {
+                    let nextIndex = timelineIndex + 1;
+                    if (nextIndex >= radarLayers.length) {
+                        nextIndex = 0; 
+                    }
+                    switchFrame(nextIndex);
+                }, 1000); 
+            }
+        }
+
+        // --- Fetch & Process Real-time Warning Polygons ---
+        async function fetchSevereAlerts() {
+            try {
+                const res = await fetch('https://api.weather.gov/alerts/active?status=actual');
+                if (!res.ok) throw new Error("API Limit exceeded");
+                
+                const data = await res.json();
+                
+                if (warningGeoJsonLayer) {
+                    map.removeLayer(warningGeoJsonLayer);
+                }
+
+                allNwsAlerts = data.features || [];
+                filteredAlerts = [...allNwsAlerts];
+                
+                processWarningStats();
+                renderSidebarAlerts();
+                drawWarningLayers();
+
+            } catch (err) {
+                console.error("Error drawing severe warnings:", err);
+                document.getElementById('alerts-container').innerHTML = `
+                    <div class="text-center p-4">
+                        <i class="fa-solid fa-circle-exclamation text-yellow-500 text-lg mb-1"></i>
+                        <p class="text-xs text-slate-400 font-mono">Unable to connect to NWS Servers. Retrying shortly.</p>
+                    </div>
+                `;
+            }
+        }
+
+        // --- Compute Warning Statistics & Update Header Badges ---
+        function processWarningStats() {
+            warningCounters = { Tornado: 0, Severe: 0, Flood: 0 };
+            
+            allNwsAlerts.forEach(alert => {
+                const event = alert.properties.event || '';
+                if (event.includes('Tornado')) warningCounters.Tornado++;
+                else if (event.includes('Severe Thunderstorm')) warningCounters.Severe++;
+                else if (event.includes('Flood')) warningCounters.Flood++;
+            });
+
+            document.getElementById('stat-tor').innerText = warningCounters.Tornado;
+            document.getElementById('stat-svr').innerText = warningCounters.Severe;
+            document.getElementById('stat-ff').innerText = warningCounters.Flood;
+            
+            const totalAlerts = allNwsAlerts.length;
+            document.getElementById('warning-total-lbl').innerText = `${totalAlerts} Total`;
+            
+            if (warningCounters.Tornado > 0 && isSoundEnabled) {
+                triggerSirens();
+            }
+        }
+
+        // --- Draw Warning Shapes Layer onto Leaflet ---
+        function drawWarningLayers() {
+            warningGeoJsonLayer = L.geoJSON(filteredAlerts, {
+                filter: function(feature) {
+                    return feature.geometry && feature.geometry.coordinates;
+                },
+                style: function(feature) {
+                    const event = feature.properties.event || '';
+                    let styleDef = WARNING_STYLES['default'];
+                    
+                    if (event.includes('Tornado')) styleDef = WARNING_STYLES['Tornado Warning'];
+                    else if (event.includes('Severe Thunderstorm')) styleDef = WARNING_STYLES['Severe Thunderstorm Warning'];
+                    else if (event.includes('Flash Flood')) styleDef = WARNING_STYLES['Flash Flood Warning'];
+                    else if (event.includes('Special Marine')) styleDef = WARNING_STYLES['Special Marine Warning'];
+                    else if (event.includes('Winter Storm')) styleDef = WARNING_STYLES['Winter Storm Warning'];
+
+                    return styleDef;
+                },
+                onEachFeature: function(feature, layer) {
+                    const p = feature.properties;
+                    
+                    let popupHtml = `
+                        <div class="p-1 font-sans text-xs w-64">
+                            <div class="flex items-center justify-between border-b border-slate-700/60 pb-1.5 mb-1.5">
+                                <span class="font-bold tracking-wider text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-red-950/40 text-red-400 border border-red-900/30">${p.event}</span>
+                                <span class="text-[9px] font-mono text-slate-400">NWS Alert</span>
+                            </div>
+                            <p class="font-bold text-slate-100 text-xs mb-1">${p.headline || 'No Headline Provided'}</p>
+                            <p class="text-[10px] text-slate-400 line-clamp-2 mb-2">${p.description || ''}</p>
+                            <div class="flex justify-between items-center border-t border-slate-800 pt-1.5 mt-1">
+                                <button onclick="viewFullAlert('${p.id}')" class="bg-sky-600 hover:bg-sky-500 text-white font-semibold font-mono text-[9px] px-2.5 py-1 rounded transition-all">READ MORE</button>
+                                <span class="text-[9px] font-mono text-slate-500">Exp: ${new Date(p.expires).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                            </div>
+                        </div>
+                    `;
+                    layer.bindPopup(popupHtml);
+                    layer.bindTooltip(p.event, { sticky: true, className: 'bg-slate-950 border border-slate-800 text-[9px] text-slate-200 rounded font-mono p-1' });
+                }
+            }).addTo(map);
+        }
+
+        // --- Sidebar Alerts Feed Renderer ---
+        function renderSidebarAlerts() {
+            const container = document.getElementById('alerts-container');
+            if (filteredAlerts.length === 0) {
+                container.innerHTML = `
+                    <div class="flex flex-col items-center justify-center h-48 text-center px-4">
+                        <i class="fa-solid fa-circle-check text-emerald-500 text-2xl mb-2 animate-bounce"></i>
+                        <p class="text-xs text-emerald-400 font-bold font-mono">No Active Warnings Found</p>
+                        <p class="text-[10px] text-slate-500 uppercase mt-0.5 font-mono">Atmospheric conditions nominal</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = '';
+            filteredAlerts.forEach(alert => {
+                const p = alert.properties;
+                const event = p.event || 'Special Alert';
+                
+                let accentColor = 'border-l-purple-500';
+                let iconClass = 'fa-triangle-exclamation';
+                let bgStyle = 'bg-slate-900/40';
+                let pulseClass = '';
+
+                if (event.includes('Tornado')) {
+                    accentColor = 'border-l-red-500';
+                    iconClass = 'fa-tornado text-red-500';
+                    bgStyle = 'bg-red-950/10 hover:bg-red-950/20';
+                    pulseClass = 'pulse-severe';
+                } else if (event.includes('Severe Thunderstorm')) {
+                    accentColor = 'border-l-yellow-500';
+                    iconClass = 'fa-cloud-bolt text-yellow-500';
+                    bgStyle = 'bg-yellow-950/10 hover:bg-yellow-950/20';
+                } else if (event.includes('Flood')) {
+                    accentColor = 'border-l-emerald-500';
+                    iconClass = 'fa-cloud-showers-water text-emerald-500';
+                    bgStyle = 'bg-emerald-950/10 hover:bg-emerald-950/20';
+                }
+
+                const card = document.createElement('div');
+                card.className = `p-3 rounded-lg border border-slate-800/80 ${accentColor} border-l-4 ${bgStyle} hover:border-slate-700 transition-all cursor-pointer ${pulseClass}`;
+                card.innerHTML = `
+                    <div class="flex items-start justify-between">
+                        <span class="text-[10px] font-bold tracking-wide font-mono text-slate-200 flex items-center gap-1.5">
+                            <i class="fa-solid ${iconClass}"></i>
+                            ${event}
+                        </span>
+                        <span class="text-[8px] font-mono text-slate-500">${new Date(p.sent).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                    </div>
+                    <p class="text-[10px] text-slate-400 mt-1 line-clamp-2">${p.headline || 'Active NWS warning coverage'}</p>
+                    <div class="flex justify-between items-center mt-2 pt-2 border-t border-slate-800/60 text-[9px] font-mono">
+                        <span class="text-sky-400 hover:underline">LOCATE</span>
+                        <span class="text-slate-500">Exp: ${new Date(p.expires).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                    </div>
+                `;
+                
+                card.addEventListener('click', () => {
+                    locateWarning(alert);
+                });
+                
+                container.appendChild(card);
+            });
+        }
+
+        // --- Zoom & Focus Warning Polygon on Map ---
+        function locateWarning(alertFeature) {
+            if (!alertFeature.geometry || !alertFeature.geometry.coordinates) {
+                showNotification(`No geographic bounding box available for: ${alertFeature.properties.areaDesc}`, 'warning');
+                return;
+            }
+
+            const tempLayer = L.geoJSON(alertFeature);
+            map.fitBounds(tempLayer.getBounds(), { maxZoom: 10, padding: [20, 20] });
+            
+            setTimeout(() => {
+                warningGeoJsonLayer.eachLayer(layer => {
+                    if (layer.feature.properties.id === alertFeature.properties.id) {
+                        layer.openPopup();
+                    }
+                });
+            }, 350);
+
+            if (isSoundEnabled) {
+                playWarningChime(alertFeature.properties.event);
+            }
+        }
+
+        // --- Filtering Warnings from Feed ---
+        function filterWarnings(type) {
+            if (type === 'Tornado') {
+                filteredAlerts = allNwsAlerts.filter(a => a.properties.event.includes('Tornado'));
+            } else if (type === 'Severe') {
+                filteredAlerts = allNwsAlerts.filter(a => a.properties.event.includes('Severe'));
+            } else if (type === 'Flood') {
+                filteredAlerts = allNwsAlerts.filter(a => a.properties.event.includes('Flood'));
+            } else {
+                filteredAlerts = [...allNwsAlerts];
+            }
+            renderSidebarAlerts();
+            drawWarningLayers();
+        }
+
+        // --- Search City / Location via OpenStreetMap Nominatim Geocoder ---
+        async function performSearch() {
+            const query = document.getElementById('search-input').value.trim();
+            if (!query) return;
+
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
+                const data = await res.json();
+                
+                if (data && data.length > 0) {
+                    const place = data[0];
+                    const lat = parseFloat(place.lat);
+                    const lon = parseFloat(place.lon);
+                    
+                    map.setView([lat, lon], 8);
+                    
+                    const marker = L.circleMarker([lat, lon], {
+                        radius: 12,
+                        color: '#0ea5e9',
+                        fillColor: '#0ea5e9',
+                        fillOpacity: 0.3,
+                        weight: 2
+                    }).addTo(map);
+                    
+                    setTimeout(() => map.removeLayer(marker), 6000);
+                } else {
+                    showNotification("Target intercept city not found.", "warning");
+                }
+            } catch (err) {
+                console.error("Geocoding failed:", err);
+            }
+        }
+
+        // --- STREAMING_CHUNK: Gathering live telemetry and high accuracy chaser positions ---
+        // --- High-Precision GPS System and Computations ---
+        function toggleGpsTracking() {
+            if (!navigator.geolocation) {
+                showNotification("Geolocation API is not supported by your browser.", "error");
+                return;
+            }
+
+            const gpsButton = document.getElementById('btn-gps');
+
+            if (isTrackingGps) {
+                navigator.geolocation.clearWatch(gpsWatchId);
+                gpsWatchId = null;
+                isTrackingGps = false;
+                
+                gpsButton.classList.remove('bg-orange-600', 'text-white', 'border-orange-500');
+                gpsButton.classList.add('bg-slate-800', 'text-slate-300');
+                
+                if (mapUserMarker) {
+                    map.removeLayer(mapUserMarker);
+                    mapUserMarker = null;
+                }
+                
+                document.getElementById('gps-lock-badge').className = 'text-[9px] text-red-500 uppercase font-bold';
+                document.getElementById('gps-lock-badge').innerText = 'Unbound';
+                document.getElementById('tele-lat').innerText = '00.00000°';
+                document.getElementById('tele-lon').innerText = '00.00000°';
+                document.getElementById('tele-speed').innerText = '0.0 MPH';
+                document.getElementById('tele-heading').innerText = '---°';
+                document.getElementById('tele-alt').innerText = '0 m';
+
+                showNotification("Real-time GPS tracking deactivated.", "info");
+            } else {
+                showNotification("Requesting persistent geolocation tracking link...", "info");
+                
+                gpsWatchId = navigator.geolocation.watchPosition(
+                    updateLiveTelemetry,
+                    handleGpsError,
+                    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+                );
+                
+                isTrackingGps = true;
+                gpsButton.classList.remove('bg-slate-800', 'text-slate-300');
+                gpsButton.classList.add('bg-orange-600', 'text-white', 'border-orange-500');
+            }
+        }
+
+        function handleGpsError(err) {
+            console.error("GPS connection failed:", err);
+            showNotification(`GPS Tracking Failure: ${err.message}`, "error");
+            
+            isTrackingGps = false;
+            const gpsButton = document.getElementById('btn-gps');
+            gpsButton.classList.remove('bg-orange-600', 'text-white', 'border-orange-500');
+            gpsButton.classList.add('bg-slate-800', 'text-slate-300');
+        }
+
+        function updateLiveTelemetry(position) {
+            const coords = position.coords;
+            
+            currentTelemetry.latitude = coords.latitude;
+            currentTelemetry.longitude = coords.longitude;
+            currentTelemetry.speed = coords.speed; 
+            currentTelemetry.heading = coords.heading; 
+            currentTelemetry.altitude = coords.altitude; 
+            currentTelemetry.timestamp = new Date(position.timestamp);
+
+            document.getElementById('gps-lock-badge').className = 'text-[9px] text-emerald-400 uppercase font-bold animate-pulse';
+            document.getElementById('gps-lock-badge').innerText = 'Locked';
+
+            document.getElementById('tele-lat').innerText = `${coords.latitude.toFixed(5)}°`;
+            document.getElementById('tele-lon').innerText = `${coords.longitude.toFixed(5)}°`;
+
+            const speedMph = coords.speed ? (coords.speed * 2.23694).toFixed(1) : "0.0";
+            document.getElementById('tele-speed').innerText = `${speedMph} MPH`;
+
+            const headingText = getCompassDirection(coords.heading);
+            document.getElementById('tele-heading').innerText = headingText;
+
+            const altText = coords.altitude ? `${coords.altitude.toFixed(0)} m` : "N/A";
+            document.getElementById('tele-alt').innerText = altText;
+
+            const latlng = [coords.latitude, coords.longitude];
+            
+            if (!mapUserMarker) {
+                const telemetryIcon = L.divIcon({
+                    className: 'custom-gps-marker',
+                    html: `
+                        <div class="relative flex items-center justify-center">
+                            <div class="absolute w-6 h-6 bg-orange-500/35 rounded-full animate-ping"></div>
+                            <div class="relative w-4 h-4 bg-orange-500 border-2 border-slate-100 rounded-full shadow-lg flex items-center justify-center">
+                                <div class="w-1.5 h-1.5 bg-white rounded-full"></div>
+                            </div>
+                        </div>
+                    `,
+                    iconSize: [24, 24]
+                });
+                
+                mapUserMarker = L.marker(latlng, { icon: telemetryIcon }).addTo(map);
+                mapUserMarker.bindTooltip("Your Tracking Station", { permanent: false, className: 'bg-slate-950 border border-slate-800 text-[10px] text-slate-200 rounded font-mono p-1' });
+            } else {
+                mapUserMarker.setLatLng(latlng);
+            }
+
+            const autoCenterChecked = document.getElementById('chk-autocenter').checked;
+            if (autoCenterChecked) {
+                map.setView(latlng, map.getZoom() < 8 ? 10 : map.getZoom());
+            }
+
+            if (isRecordingSession) {
+                logSessionTelemetry(coords, speedMph, headingText);
+            }
+        }
+
+        function getCompassDirection(bearing) {
+            if (bearing === null || bearing === undefined || isNaN(bearing)) return "---°";
+            const compassSectors = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+            const index = Math.round(bearing / 22.5) % 16;
+            return `${bearing.toFixed(0)}° ${compassSectors[index]}`;
+        }
+
+        // --- Dashcam Stream Integrations ---
+        async function toggleCameraPower() {
+            const videoEl = document.getElementById('dashcam-video');
+            const placeholderEl = document.getElementById('dashcam-placeholder');
+            const indicatorEl = document.getElementById('dashcam-indicator');
+            const labelEl = document.getElementById('dashcam-status-lbl');
+            const btnEl = document.getElementById('btn-camera-power');
+
+            if (cameraStream) {
+                stopCameraStream();
+                videoEl.classList.add('hidden');
+                placeholderEl.classList.remove('hidden');
+                
+                indicatorEl.className = 'w-1.5 h-1.5 rounded-full bg-slate-600';
+                labelEl.innerText = 'Disconnected';
+                labelEl.className = 'text-[8px] font-mono text-slate-500 uppercase';
+                
+                btnEl.innerHTML = `<i class="fa-solid fa-power-off"></i> Connect Dashcam`;
+                btnEl.className = 'w-full text-[10px] font-semibold bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 py-1.5 px-2 rounded-md transition-all font-mono flex items-center justify-center gap-1';
+                showNotification("Dashcam stream terminated.", "info");
+            } else {
+                showNotification("Connecting to system camera inputs...", "info");
+                try {
+                    cameraStream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+                        audio: true 
+                    });
+                    
+                    videoEl.srcObject = cameraStream;
+                    videoEl.classList.remove('hidden');
+                    placeholderEl.classList.add('hidden');
+                    
+                    indicatorEl.className = 'w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse';
+                    labelEl.innerText = 'Connected';
+                    labelEl.className = 'text-[8px] font-mono text-emerald-400 uppercase font-bold';
+                    
+                    btnEl.innerHTML = `<i class="fa-solid fa-circle-stop text-red-500"></i> Disconnect Feed`;
+                    btnEl.className = 'w-full text-[10px] font-semibold bg-red-950/20 hover:bg-red-950/40 border border-red-900/40 text-red-300 py-1.5 px-2 rounded-md transition-all font-mono flex items-center justify-center gap-1';
+                    
+                    showNotification("Dashcam stream connected successfully.", "success");
+                } catch (err) {
+                    console.error("Camera connection failed:", err);
+                    showNotification(`Camera Hook Error: Secure HTTPS connection or localhost is required for browser device permissions.`, "error");
+                }
+            }
+        }
+
+        function stopCameraStream() {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(track => track.stop());
+                cameraStream = null;
+            }
+            document.getElementById('dashcam-video').srcObject = null;
+        }
+
+        // --- Session Recording & Synchronized Log Exporters ---
+        function toggleSessionRecording() {
+            const btn = document.getElementById('btn-rec-control');
+            const dot = document.getElementById('rec-dot');
+            const timerText = document.getElementById('rec-timer');
+            const exportBtn = document.getElementById('btn-export-session');
+
+            if (isRecordingSession) {
+                stopSessionRecording();
+            } else {
+                if (!cameraStream) {
+                    showNotification("Cannot record. Connect camera feed first.", "warning");
+                    return;
+                }
+                
+                try {
+                    recordedVideoChunks = [];
+                    sessionTelemetryHistory = [];
+                    
+                    let options = { mimeType: 'video/webm;codecs=vp9,opus' };
+                    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                        options = { mimeType: 'video/webm;codecs=vp8,opus' };
+                        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                            options = { mimeType: 'video/webm' };
+                        }
+                    }
+
+                    mediaRecorder = new MediaRecorder(cameraStream, options);
+                    
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data && event.data.size > 0) {
+                            recordedVideoChunks.push(event.data);
+                        }
+                    };
+
+                    mediaRecorder.onstop = () => {
+                        exportBtn.removeAttribute('disabled');
+                        exportBtn.className = 'w-full text-xs font-bold bg-orange-600 hover:bg-orange-500 active:scale-95 text-white py-2 rounded-lg transition-all font-mono flex items-center justify-center gap-1.5 shadow-lg shadow-orange-900/25';
+                        showNotification("Recording captured! Intercept suite package is ready for export.", "success");
+                    };
+
+                    mediaRecorder.start(1000); 
+                    isRecordingSession = true;
+                    sessionRecordStartTime = Date.now();
+                    
+                    btn.innerHTML = `<i class="fa-solid fa-circle-stop"></i> Stop & Save Session`;
+                    btn.className = 'w-full text-xs font-bold bg-red-600 hover:bg-red-500 active:scale-95 text-white py-2 rounded-lg transition-all font-mono flex items-center justify-center gap-1.5 shadow-lg shadow-red-900/20';
+                    dot.className = 'w-1.5 h-1.5 rounded-full bg-red-500 animate-ping';
+                    exportBtn.setAttribute('disabled', 'true');
+                    exportBtn.className = 'w-full text-xs font-bold bg-slate-800 hover:bg-slate-700 active:scale-95 disabled:opacity-40 disabled:pointer-events-none text-slate-300 py-2 rounded-lg transition-all font-mono flex items-center justify-center gap-1.5';
+
+                    sessionTimerInterval = setInterval(() => {
+                        const elapsedMs = Date.now() - sessionRecordStartTime;
+                        const totalSeconds = Math.floor(elapsedMs / 1000);
+                        const mins = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+                        const secs = (totalSeconds % 60).toString().padStart(2, '0');
+                        timerText.innerText = `REC: ${mins}:${secs}`;
+                        timerText.className = 'text-[9px] font-mono text-red-500 uppercase font-bold';
+
+                        if (!isTrackingGps) {
+                            logSessionTelemetry(null, "0.0", "---°");
+                        }
+                    }, 1000);
+
+                    showNotification("Tactical Session Recording initialized.", "success");
+
+                } catch (err) {
+                    console.error("Recording setup failed:", err);
+                    showNotification(`Recorder Setup Error: ${err.message}`, "error");
+                }
+            }
+        }
+
+        function stopSessionRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+
+            clearInterval(sessionTimerInterval);
+            isRecordingSession = false;
+
+            const btn = document.getElementById('btn-rec-control');
+            const dot = document.getElementById('rec-dot');
+            const timerText = document.getElementById('rec-timer');
+
+            btn.innerHTML = `<i class="fa-solid fa-circle text-[9px] animate-pulse"></i> Start Recording Session`;
+            btn.className = 'w-full text-xs font-bold bg-orange-600 hover:bg-orange-500 active:scale-95 text-white py-2 rounded-lg transition-all font-mono flex items-center justify-center gap-1.5 shadow-lg shadow-orange-900/20';
+            dot.className = 'w-1.5 h-1.5 rounded-full bg-slate-600';
+            timerText.innerText = 'OFFLINE';
+            timerText.className = 'text-[9px] font-mono text-slate-500 uppercase';
+        }
+
+        function logSessionTelemetry(coords, speedVal, headingVal) {
+            const timestamp = new Date();
+            const elapsedSecs = sessionRecordStartTime ? ((timestamp.getTime() - sessionRecordStartTime) / 1000).toFixed(1) : 0;
+            
+            sessionTelemetryHistory.push({
+                elapsedSeconds: elapsedSecs,
+                utcTime: timestamp.toISOString(),
+                localTime: timestamp.toLocaleTimeString(),
+                latitude: coords ? coords.latitude : (currentTelemetry.latitude || "N/A"),
+                longitude: coords ? coords.longitude : (currentTelemetry.longitude || "N/A"),
+                pressureHpa: currentPressure.toFixed(2),
+                speedMph: speedVal,
+                heading: headingVal,
+                altitude: coords && coords.altitude ? coords.altitude.toFixed(1) : (currentTelemetry.altitude ? currentTelemetry.altitude.toFixed(1) : "N/A")
+            });
+        }
+
+        function exportRecordedSuite() {
+            if (recordedVideoChunks.length === 0) {
+                showNotification("No recorded files found to export.", "warning");
+                return;
+            }
+
+            const exportBtn = document.getElementById('btn-export-session');
+            exportBtn.setAttribute('disabled', 'true');
+            exportBtn.innerText = "Processing Suite...";
+
+            try {
+                const videoBlob = new Blob(recordedVideoChunks, { type: 'video/webm' });
+                const videoUrl = URL.createObjectURL(videoBlob);
+                
+                const videoAnchor = document.createElement('a');
+                videoAnchor.href = videoUrl;
+                videoAnchor.download = `nexstorm_dashcam_${Date.now()}.webm`;
+                document.body.appendChild(videoAnchor);
+                videoAnchor.click();
+                document.body.removeChild(videoAnchor);
+
+                let csvRows = [
+                    ["Elapsed Seconds", "Timestamp (UTC)", "Local Time", "Latitude", "Longitude", "Atmospheric Pressure (hPa)", "Velocity (MPH)", "Heading (Bearing)", "Altitude (Meters)"]
+                ];
+
+                sessionTelemetryHistory.forEach(log => {
+                    csvRows.push([
+                        log.elapsedSeconds,
+                        log.utcTime,
+                        `"${log.localTime}"`,
+                        log.latitude,
+                        log.longitude,
+                        log.pressureHpa,
+                        log.speedMph,
+                        `"${log.heading}"`,
+                        log.altitude
+                    ]);
+                });
+
+                const csvContent = csvRows.map(e => e.join(",")).join("\n");
+                const csvBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const csvUrl = URL.createObjectURL(csvBlob);
+
+                const csvAnchor = document.createElement('a');
+                csvAnchor.href = csvUrl;
+                csvAnchor.download = `nexstorm_telemetry_${Date.now()}.csv`;
+                document.body.appendChild(csvAnchor);
+                csvAnchor.click();
+                document.body.removeChild(csvAnchor);
+
+                showNotification("Export suite downloaded successfully!", "success");
+
+            } catch (err) {
+                console.error("Export process collapsed:", err);
+                showNotification(`Export collapsed: ${err.message}`, "error");
+            } finally {
+                exportBtn.removeAttribute('disabled');
+                exportBtn.className = 'w-full text-xs font-bold bg-orange-600 hover:bg-orange-500 active:scale-95 text-white py-2 rounded-lg transition-all font-mono flex items-center justify-center gap-1.5 shadow-lg shadow-orange-900/25';
+                exportBtn.innerHTML = `<i class="fa-solid fa-file-export"></i> Export Intercept logs`;
+            }
+        }
+
+        // --- Synthesized Procedural Audio System (Tone.js) ---
+        function toggleSound() {
+            if (!isSoundEnabled) {
+                Tone.start();
+                synth = new Tone.PolySynth(Tone.Synth).toDestination();
+                synth.set({
+                    oscillator: { type: "triangle" },
+                    envelope: { attack: 0.05, decay: 0.1, sustain: 0.3, release: 0.8 }
+                });
+                
+                isSoundEnabled = true;
+                document.getElementById('sound-icon').className = 'fa-solid fa-volume-high text-emerald-400 animate-pulse';
+                document.getElementById('sound-text').innerText = 'Audio Enabled';
+                
+                synth.triggerAttackRelease(["C4", "E4", "G4"], "0.3");
+            } else {
+                isSoundEnabled = false;
+                document.getElementById('sound-icon').className = 'fa-solid fa-volume-mute text-slate-500';
+                document.getElementById('sound-text').innerText = 'Mute Audio';
+            }
+        }
+
+        function playWarningChime(eventType) {
+            if (!isSoundEnabled || !synth) return;
+            
+            if (eventType.includes('Tornado')) {
+                synth.triggerAttackRelease(["A5", "C6"], "0.2");
+                setTimeout(() => synth.triggerAttackRelease(["A5", "C6"], "0.2"), 300);
+            } else if (eventType.includes('Severe')) {
+                synth.triggerAttackRelease(["E5", "G5"], "0.15");
+            } else {
+                synth.triggerAttackRelease(["C4", "G4"], "0.3");
+            }
+        }
+
+        function triggerSirens() {
+            if (!isSoundEnabled || !synth) return;
+            const now = Tone.now();
+            synth.triggerAttackRelease("C5", "0.5", now);
+            synth.triggerAttackRelease("F5", "0.5", now + 0.6);
+        }
+
+        // --- Full Screen Detail Modals ---
+        function viewFullAlert(id) {
+            const alert = allNwsAlerts.find(a => a.properties.id === id);
+            if (!alert) return;
+
+            const p = alert.properties;
+            
+            document.getElementById('modal-title').innerText = p.event || 'Severe Warning';
+            document.getElementById('modal-badge').innerText = p.severity || 'Moderate';
+            
+            const badge = document.getElementById('modal-badge');
+            if (p.event.includes('Tornado')) {
+                badge.className = 'text-[10px] font-mono px-2 py-0.5 rounded border uppercase bg-red-950 text-red-400 border-red-800';
+            } else if (p.event.includes('Severe')) {
+                badge.className = 'text-[10px] font-mono px-2 py-0.5 rounded border uppercase bg-yellow-950 text-yellow-400 border-yellow-800';
+            } else {
+                badge.className = 'text-[10px] font-mono px-2 py-0.5 rounded border uppercase bg-slate-900 text-slate-300 border-slate-700';
+            }
+
+            document.getElementById('modal-sub').innerText = `ID: ${p.id || 'NWS'}`;
+            document.getElementById('modal-headline').innerText = p.headline || 'No specific headline provided.';
+            document.getElementById('modal-areas').innerText = p.areaDesc || 'US Regional Coordinates';
+            document.getElementById('modal-expires').innerText = new Date(p.expires).toLocaleString();
+            document.getElementById('modal-severity').innerText = `${p.severity || 'N/A'} Severity | ${p.urgency || 'N/A'} Urgency`;
+            document.getElementById('modal-desc').innerText = p.description || 'No extended description available.';
+            document.getElementById('modal-instruction').innerText = p.instruction || 'Monitor local weather broadcasts and instructions.';
+
+            document.getElementById('modal-alert').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('modal-alert').classList.add('hidden');
+        }
+
+        // --- Mobile Responsive Drawer Handler ---
+        function toggleSidebar() {
+            const sidebar = document.getElementById('alert-sidebar');
+            if (sidebar.classList.contains('-translate-x-full')) {
+                sidebar.classList.remove('-translate-x-full');
+            } else {
+                sidebar.classList.add('-translate-x-full');
+            }
+        }
+
+        // --- STREAMING_CHUNK: Enhancing camera size controls for both height and width ---
+        function setupWebcamSizer() {
+            const container = document.getElementById('dashcam-container');
+            const heightSlider = document.getElementById('slider-cam-height');
+            const heightLabel = document.getElementById('lbl-cam-height');
+            const widthSlider = document.getElementById('slider-cam-width');
+            const widthLabel = document.getElementById('lbl-cam-width');
+            const videoEl = document.getElementById('dashcam-video');
+            const btnPip = document.getElementById('btn-pip');
+
+            const setHeight = (val) => {
+                container.style.height = `${val}px`;
+                heightSlider.value = val;
+                heightLabel.innerText = `${val}px`;
+            };
+
+            const setWidth = (val) => {
+                if (val >= 320 && !isTelemetryCollapsed) {
+                    container.style.width = '100%';
+                    widthLabel.innerText = '100%';
+                } else {
+                    container.style.width = `${val}px`;
+                    widthLabel.innerText = `${val}px`;
+                }
+                widthSlider.value = val;
+            };
+
+            heightSlider.addEventListener('input', (e) => {
+                setHeight(e.target.value);
+            });
+
+            widthSlider.addEventListener('input', (e) => {
+                setWidth(e.target.value);
+            });
+
+            document.getElementById('btn-size-sm').addEventListener('click', () => setHeight(120));
+            document.getElementById('btn-size-md').addEventListener('click', () => setHeight(180));
+            document.getElementById('btn-size-lg').addEventListener('click', () => setHeight(300));
+
+            btnPip.addEventListener('click', async () => {
+                if (!document.pictureInPictureEnabled) {
+                    showNotification("Picture-in-Picture mode is not supported in this browser.", "warning");
+                    return;
+                }
+                if (!cameraStream) {
+                    showNotification("Connect your webcam feed first to use Picture-in-Picture.", "info");
+                    return;
+                }
+                try {
+                    if (document.pictureInPictureElement) {
+                        await document.exitPictureInPicture();
+                    } else {
+                        await videoEl.requestPictureInPicture();
+                    }
+                } catch (err) {
+                    console.error("Picture-in-Picture failure:", err);
+                }
+            });
+        }
+
+        // --- Handling DOM widget shifting on collapse ---
+        function setTelemetrySidebarCollapsed(collapsed) {
+            isTelemetryCollapsed = collapsed;
+            const sidebar = document.getElementById('telemetry-sidebar');
+            const icon = document.querySelector('#btn-close-telemetry i');
+            
+            if (isTelemetryCollapsed) {
+                sidebar.classList.add('translate-x-full', 'md:translate-x-full');
+                sidebar.classList.remove('translate-x-0', 'md:translate-x-0');
+                if (icon) {
+                    icon.className = 'fa-solid fa-angles-left text-xs';
+                }
+            } else {
+                sidebar.classList.remove('translate-x-full', 'md:translate-x-full');
+                sidebar.classList.add('translate-x-0', 'md:translate-x-0');
+                if (icon) {
+                    icon.className = 'fa-solid fa-angles-right text-xs';
+                }
+            }
+            
+            updateWidgetsPlacement();
+        }
+
+        function toggleTelemetry() {
+            setTelemetrySidebarCollapsed(!isTelemetryCollapsed);
+        }
+
+        // Move widgets between the Collapsible Sidebar and the Map's Floating Top-Right Box
+        function updateWidgetsPlacement() {
+            const camWidget = document.getElementById('dashcam-widget-wrapper');
+            const geoWidget = document.getElementById('geolocation-widget-wrapper');
+            const baroWidget = document.getElementById('barometer-widget-wrapper');
+            const corridorWidget = document.getElementById('corridor-widget-wrapper');
+
+            const floatingBox = document.getElementById('floating-telemetry-box');
+            const sidebarParent = document.getElementById('telemetry-widgets-container');
+            const recorderWidget = document.getElementById('recorder-widget-wrapper');
+
+            if (!camWidget || !geoWidget || !baroWidget || !corridorWidget || !floatingBox || !sidebarParent) return;
+
+            if (isTelemetryCollapsed) {
+                floatingBox.appendChild(camWidget);
+                floatingBox.appendChild(geoWidget);
+                floatingBox.appendChild(baroWidget);
+                floatingBox.appendChild(corridorWidget);
+                
+                camWidget.style.maxWidth = '320px';
+                geoWidget.style.maxWidth = '320px';
+                baroWidget.style.maxWidth = '320px';
+                corridorWidget.style.maxWidth = '320px';
+                
+                floatingBox.classList.remove('hidden');
+                floatingBox.classList.add('flex');
+            } else {
+                sidebarParent.insertBefore(baroWidget, recorderWidget);
+                sidebarParent.insertBefore(corridorWidget, recorderWidget);
+                sidebarParent.insertBefore(camWidget, recorderWidget);
+                sidebarParent.insertBefore(geoWidget, recorderWidget);
+                
+                camWidget.style.maxWidth = '';
+                geoWidget.style.maxWidth = '';
+                baroWidget.style.maxWidth = '';
+                corridorWidget.style.maxWidth = '';
+                
+                floatingBox.classList.add('hidden');
+                floatingBox.classList.remove('flex');
+            }
+        }
+
+        function toggleNightVision() {
+            const body = document.body;
+            const btn = document.getElementById('btn-night-vision');
+            if (body.classList.contains('night-vision-mode')) {
+                body.classList.remove('night-vision-mode');
+                btn.className = 'bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700/50 p-2 rounded-lg text-rose-500 hover:text-rose-400 transition-all';
+                showNotification("Tactical Night Vision deactivated.", "info");
+            } else {
+                body.classList.add('night-vision-mode');
+                btn.className = 'bg-rose-950/40 border border-rose-800 text-rose-400 p-2 rounded-lg transition-all animate-pulse';
+                showNotification("Tactical Night Vision activated. Monochromatic eyes protection adaptive matrix synced.", "success");
+            }
+        }
+
+        // --- Core App Interactions ---
+        function setupEventListeners() {
+            setupWebcamSizer();
+
+            // Opacity Handler
+            document.getElementById('radar-opacity').addEventListener('input', (e) => {
+                const val = e.target.value;
+                document.getElementById('opacity-val').innerText = `${val}%`;
+                
+                radarLayers.forEach(layer => {
+                    layer.setOpacity(parseFloat(val) / 100);
+                });
+            });
+
+            // Cloud Layer Action Listeners
+            document.getElementById('cloud-select').addEventListener('change', updateCloudLayers);
+            document.getElementById('cloud-opacity').addEventListener('input', (e) => {
+                const val = e.target.value;
+                document.getElementById('cloud-opacity-val').innerText = `${val}%`;
+                if (cloudLayerEast) cloudLayerEast.setOpacity(parseFloat(val) / 100);
+                if (cloudLayerWest) cloudLayerWest.setOpacity(parseFloat(val) / 100);
+            });
+
+            // Playback Slider Handler
+            document.getElementById('timeline-slider').addEventListener('input', (e) => {
+                const val = parseInt(e.target.value);
+                switchFrame(val);
+            });
+
+            // Loop Controls Buttons
+            document.getElementById('btn-loop-play').addEventListener('click', togglePlayback);
+            document.getElementById('btn-loop-prev').addEventListener('click', () => {
+                let prev = timelineIndex - 1;
+                if (prev < 0) prev = radarLayers.length - 1;
+                switchFrame(prev);
+            });
+            document.getElementById('btn-loop-next').addEventListener('click', () => {
+                let next = timelineIndex + 1;
+                if (next >= radarLayers.length) next = 0;
+                switchFrame(next);
+            });
+
+            // Switch Radar Layer type
+            document.getElementById('layer-select').addEventListener('change', loadRadarLayers);
+
+            // Sound Toggle Keybind
+            document.getElementById('sound-toggle').addEventListener('click', toggleSound);
+
+            // Night Vision Toggle
+            document.getElementById('btn-night-vision').addEventListener('click', toggleNightVision);
+
+            // Baro meso collapse trigger
+            document.getElementById('btn-baro-drop').addEventListener('click', triggerMesoPressureCollapse);
+
+            // Intercept Draw Planner controls
+            document.getElementById('btn-draw-planner').addEventListener('click', toggleCorridorPlanner);
+            document.getElementById('btn-clear-corridor').addEventListener('click', clearCorridorLayer);
+            document.getElementById('input-cell-speed').addEventListener('change', calculateStormCorridor);
+
+            // SPC Convective outlook checkbox
+            document.getElementById('chk-spc').addEventListener('change', (e) => {
+                toggleSpcOutlook(e.target.checked);
+            });
+
+            // METAR Weather checkbox
+            document.getElementById('chk-metar').addEventListener('change', (e) => {
+                toggleMetarObservations(e.target.checked);
+            });
+
+            // Geolocation and Telemetry Panel Controls
+            document.getElementById('btn-gps').addEventListener('click', toggleGpsTracking);
+            document.getElementById('btn-telemetry-toggle').addEventListener('click', toggleTelemetry);
+            document.getElementById('btn-close-telemetry').addEventListener('click', () => setTelemetrySidebarCollapsed(true));
+            document.getElementById('btn-camera-power').addEventListener('click', toggleCameraPower);
+            document.getElementById('btn-rec-control').addEventListener('click', toggleSessionRecording);
+            document.getElementById('btn-export-session').addEventListener('click', exportRecordedSuite);
+
+            // Search Handlers
+            document.getElementById('search-btn').addEventListener('click', performSearch);
+            document.getElementById('search-input').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') performSearch();
+            });
+        }
+    </script>
+</body>
+</html>
