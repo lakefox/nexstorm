@@ -409,7 +409,7 @@
                     <div class="flex justify-between items-end">
                         <div class="flex flex-col">
                             <span class="text-[8px] uppercase font-mono text-slate-500">Current Pressure</span>
-                            <span id="lbl-pressure-val" class="text-lg font-bold tech-font text-sky-400">1013.25 <span class="text-[10px] text-slate-400">hPa</span></span>
+                            <span id="lbl-pressure-val" class="text-lg font-bold tech-font text-sky-400">1013.25 <span class="text-[10px] text-slate-400">inHG</span></span>
                         </div>
                         <button id="btn-baro-drop" title="Simulate pressure drops within storm updrafts" class="bg-red-950/40 hover:bg-red-900/30 border border-red-900/40 text-[9px] font-mono text-red-400 px-2 py-1 rounded">
                             <i class="fa-solid fa-wind animate-pulse mr-1"></i>Meso Drop
@@ -809,7 +809,7 @@
                     barometerSensor = new Barometer({ frequency: 0.2 }); // Poll once every 5 seconds
                     barometerSensor.addEventListener('reading', () => {
                         const pressureHpa = barometerSensor.pressure / 100; // Convert Pa to hPa
-                        updatePressureValue(pressureHpa, true);
+                        updatePressureValue(pressureHpa*0.02953, true);
                     });
                     barometerSensor.addEventListener('error', (event) => {
                         console.warn("Hardware barometer connection error:", event.error.name);
